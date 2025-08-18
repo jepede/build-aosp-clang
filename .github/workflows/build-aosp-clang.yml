@@ -67,6 +67,135 @@ jobs:
           ln -s "$ROOTDIR/android-ndk-${NDK_VERSION}" "$ROOTDIR/ndk"
           ls -la "$ROOTDIR/ndk"
 
+      - name: 克隆 AOSP 源码（llvm-project / llvm_android）
+        run: |
+          set -eux
+          mkdir -p "$SRC_DIR"
+          git clone https://android.googlesource.com/toolchain/llvm-project "$SRC_DIR/llvm-project"
+          if [ -n "${{ inputs.llvm_project_ref }}" ]; then
+            git -C "$SRC_DIR/llvm-project" fetch --depth 1 origin "${{ inputs.llvm_project_ref }}"
+            git -C "$SRC_DIR/llvm-project" checkout FETCH_HEAD
+          fi
+          git clone https://android.googlesource.com/toolchain/llvm_android "$SRC_DIR/llvm_android"
+          if [ -n "${{ inputs.llvm_android_ref }}" ]; then
+            git -C "$SRC_DIR/llvm_android" fetch --depth 1 origin "${{ inputs.llvm_android_ref }}"
+            git -C "$SRC_DIR/llvm_android" checkout FETCH_HEAD
+          fi
+          echo "llvm-project @ $(git -C "$SRC_DIR/llvm-project" rev-parse --short HEAD)"
+          echo "llvm_android @ $(git -C "$SRC_DIR/llvm_android" rev-parse --short HEAD)"
+
+      - name: 解析 r 版本并自动应用补丁（纯 Shell + jq）
+        env:
+          AOSP_REV: ${{ inputs.aosp_rev }}
+        run: |
+          set -eux
+          REV_NUM="$(echo "$AOSP_REV" | sed -E 's/^r([0-9]+).*/\1/')"
+          test -n "$REV_NUM" || (echo "无法从 ${AOSP_REV} 解析 svn 版本号" && exit 1)
+          echo "svn_version = $REV_NUM"
+
+          PATCH_ROOT="$SRC_DIR/llvm_android/patches"
+          PATCHES_JSON="$PATCH_ROOT/PATCHES.json"
+          test -f "$PATCHES_JSON" || (echo "找不到 PATCHES.json: $PATCHES_JSON" && exit 1)
+
+          git -C "$SRC_DIR/llvm-project" reset --hard
+          git -C "$SRC_DIR/llvm-project" clean -fdx
+          git -C "$SRC_DIR/llvm-project" config user.email "actions@github.com"
+          git -C "$SRC_DIR/llvm-project" config user.name  "GitHub Actions"
+
+          # 选出对当前 r 版本生效的补丁条目（有 start/end 区间且路径存在）
+          mapfile -t PATCHES < <(jq -r --argjson R "$REV_NUM" '
+            .[] | . as $e
+            | ( ($e.start_version // -1) <= $R and $R <= ($e.end_version // 99999999) )
+            | if . then ($e.patch // $e.path // "") else "" end
+            ' "$PATCHES_JSON" \
+            | sed '/^$/d' \
+            | while read -r p; do
+                [ -f "$PATCH_ROOT/$p" ] && echo "$p" || true
+              done)
+
+          echo "将应用补丁数量：${#PATCHES[@]}"
+          for p in "${PATCHES[@]}"; do
+            PP="$PATCH_ROOT/$p"
+            echo ">> 应用补丁: $p"
+            if git -C "$SRC_DIR/llvm-project" am --keep-cr "$PP"; then
+              continue
+            else
+              git -C "$SRC_DIR/llvm-project" am --abort || true
+              patch -p1 --forward --input="$PP" -d "$SRC_DIR/llvm-project"
+            fi
+          done
+
+      - name: 配置（CMake + NDK 交叉构建到 aarch64-android）
+        env:
+          ANDROID_NDK_HOME: ${{ github.workspace }}/ndk
+          ANDROID_NDK_ROOT: ${{ github.workspace }}/ndk
+        run: |
+          set -eux
+          API="${{ inputs.android_platform }}"
+          TOOLCHAIN="$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64"
+          export CC="${TOOLCHAIN}/bin/${TARGET_TRIPLE}${API}-clang"
+          export CXX="${TOOLCHAIN}/bin/${TARGET_TRIPLE}${API}-clang++"
+          export AR="${TOOLCHAIN}/bin/llvm-ar"
+          export RANLIB="${TOOLCHAIN}/bin/llvm-ranlib"
+          export STRIP="${TOOLCHAIN}/bin/llvm-strip"
+          export LD="${TOOLCHAIN}/bin/ld.lld"
+
+          mkdir -p "$BUILD_DIR" "$INSTALL_DIR"
+          cmake -S "$SRC_DIR/llvm-project/llvm" -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ROOTDIR/ndk/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM="${API}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+            -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt;" \
+            -DLLVM_TARGETS_TO_BUILD="AArch64" \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DLLVM_ENABLE_ZLIB=ON \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_BACKTRACES=OFF \
+            -DCMAKE_C_FLAGS="-fvisibility=hidden -fdata-sections -ffunction-sections" \
+            -DCMAKE_CXX_FLAGS="-fvisibility=hidden -fdata-sections -ffunction-sections -static-libstdc++" \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -latomic" \
+            -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--gc-sections -latomic"
+
+      - name: 构建并安装
+        run: |
+          set -eux
+          cmake --build "$BUILD_DIR" --target clang lld -- -j"$(nproc)" || cmake --build "$BUILD_DIR" -- -j"$(nproc)"
+          cmake --install "$BUILD_DIR"
+          if [ -d "$INSTALL_DIR/bin" ]; then
+            find "$INSTALL_DIR/bin" -type f -maxdepth 1 -print0 | while IFS= read -r -d '' f; do
+              if file "$f" | grep -q ELF; then
+                "$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" -s "$f" || true
+              fi
+            done
+          fi
+          tree -L 3 "$INSTALL_DIR" || true
+
+      - name: 打包
+        id: pack
+        run: |
+          API="${{ inputs.android_platform }}"
+          TAR_NAME="aosp-clang-${{ inputs.aosp_rev }}-android-aarch64-ndk-${NDK_VERSION}-api${API}"
+          echo "tar_name=${TAR_NAME}" >> "$GITHUB_OUTPUT"
+          mkdir -p "$ROOTDIR/out"
+          (cd "$(dirname "$INSTALL_DIR")" && tar -c "$(basename "$INSTALL_DIR")") | xz -T0 -v > "$ROOTDIR/out/${TAR_NAME}.tar.xz"
+          ls -lh "$ROOTDIR/out/${TAR_NAME}.tar.xz"
+
+      - name: 上传构建产物到 Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.tar_name }}
+          path: out/${{ steps.pack.outputs.tar_name }}.tar.xz
+          retention-days: 7
+
+
+
+
+
+
       - name: 克隆 tomxi 脚本（build-aosp-clang-for-arm64）
         run: |
           set -eux
