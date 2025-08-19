@@ -184,7 +184,7 @@ jobs:
             -DLLVM_ENABLE_TERMINFO=OFF \
             -DLLVM_ENABLE_BACKTRACES=OFF \
             -DLLVM_USE_LINKER=lld \
-            -DLLVM_PARALLEL_LINK_JOBS=1 \  # ↓ 链接阶段强行单并发，防 OOM
+            -DLLVM_PARALLEL_LINK_JOBS=1 \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DCMAKE_C_FLAGS="-fvisibility=hidden -fdata-sections -ffunction-sections" \
