@@ -147,7 +147,7 @@ jobs:
             -DANDROID_PLATFORM="${API}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-            -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt;" \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" \
             -DLLVM_TARGETS_TO_BUILD="AArch64" \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
             -DLLVM_INCLUDE_TESTS=OFF \
