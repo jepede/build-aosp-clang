@@ -156,7 +156,7 @@ jobs:
             -DLLVM_ENABLE_TERMINFO=OFF \
             -DLLVM_ENABLE_BACKTRACES=OFF \
             -DCMAKE_C_FLAGS="-fvisibility=hidden -fdata-sections -ffunction-sections" \
-            -DCMAKE_CXX_FLAGS="-fvisibility=hidden -fdata-sections -ffunction-sections -static-libstdc++" \
+            -DCMAKE_CXX_FLAGS="-fvisibility=hidden -fdata-sections -ffunction-sections" \
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -latomic" \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--gc-sections -latomic"
 
