@@ -1,0 +1,119 @@
+name: Build gdbserver (aarch64, Android)
+
+on:
+  workflow_dispatch:
+    inputs:
+      gdb_version:
+        description: "GDB release version (e.g. 14.2, 13.2)"
+        default: "14.2"
+        required: true
+        type: string
+      ndk_version:
+        description: "Android NDK version (e.g. r28c, r27d)"
+        default: "r28c"
+        required: true
+        type: string
+      api_level:
+        description: "Android API level (>=21 for arm64)"
+        default: "23"
+        required: true
+        type: string
+      static_pie:
+        description: "Link static PIE? (0=dynamic PIE, 1=static PIE)"
+        default: "0"
+        required: true
+        type: choice
+        options:
+          - "0"
+          - "1"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    env:
+      OUTDIR: ${{ github.workspace }}/out
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential curl xz-utils
+
+      - name: Setup Android NDK
+        uses: android-actions/setup-ndk@v3
+        with:
+          ndk-version: ${{ inputs.ndk_version }}
+
+      - name: Show NDK root
+        run: |
+          echo "ANDROID_NDK_ROOT=${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          echo "OUTDIR=$OUTDIR"
+
+      - name: Download GDB ${{ inputs.gdb_version }}
+        run: |
+          echo "Downloading gdb-${{ inputs.gdb_version }}.tar.xz"
+          curl -L "https://ftp.gnu.org/gnu/gdb/gdb-${{ inputs.gdb_version }}.tar.xz" -o gdb.tar.xz
+          tar -xf gdb.tar.xz
+          mv "gdb-${{ inputs.gdb_version }}" gdb-src
+
+      - name: Create build script (echo only)
+        run: |
+          echo '#!/usr/bin/env bash'                                 >  build.sh
+          echo 'set -euo pipefail'                                   >> build.sh
+          echo 'GDB_SRC="$PWD/gdb-src"'                              >> build.sh
+          echo 'API="${API:-${{ inputs.api_level }}}"'               >> build.sh
+          echo 'STATIC="${STATIC:-${{ inputs.static_pie }}}"'        >> build.sh
+          echo 'NDKROOT="${ANDROID_NDK_ROOT:-$ANDROID_NDK_HOME}"'    >> build.sh
+          echo 'if [[ -z "${NDKROOT}" ]]; then echo "NDK not found"; exit 1; fi' >> build.sh
+          echo 'if [[ ! -d "$GDB_SRC/gdb/gdbserver" ]]; then echo "gdbserver dir missing"; exit 1; fi' >> build.sh
+          echo 'HOST_PREBUILT=""'                                    >> build.sh
+          echo 'for d in linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64; do' >> build.sh
+          echo '  if [[ -d "$NDKROOT/toolchains/llvm/prebuilt/$d" ]]; then HOST_PREBUILT="$d"; break; fi' >> build.sh
+          echo 'done'                                                >> build.sh
+          echo 'if [[ -z "$HOST_PREBUILT" ]]; then echo "prebuilt toolchain not found"; exit 1; fi' >> build.sh
+          echo 'TC="$NDKROOT/toolchains/llvm/prebuilt/$HOST_PREBUILT"' >> build.sh
+          echo 'SYSROOT="$TC/sysroot"'                               >> build.sh
+          echo 'TRIPLE="aarch64-linux-android"'                      >> build.sh
+          echo 'CC="$TC/bin/${TRIPLE}${API}-clang"'                  >> build.sh
+          echo 'CXX="$TC/bin/${TRIPLE}${API}-clang++"'               >> build.sh
+          echo 'AR="$TC/bin/llvm-ar"'                                >> build.sh
+          echo 'RANLIB="$TC/bin/llvm-ranlib"'                        >> build.sh
+          echo 'STRIP="$TC/bin/llvm-strip"'                          >> build.sh
+          echo 'INSTALL_PREFIX="$OUTDIR/$TRIPLE"'                    >> build.sh
+          echo 'mkdir -p "$INSTALL_PREFIX/bin" "$OUTDIR/build-aarch64"' >> build.sh
+          echo 'CFLAGS="-fPIE -fPIC -O2 --sysroot=$SYSROOT -D__ANDROID_API__=$API"' >> build.sh
+          echo 'LDFLAGS="-pie"'                                      >> build.sh
+          echo 'if [[ "$STATIC" == "1" ]]; then LDFLAGS="-static -static-pie"; fi' >> build.sh
+          echo 'echo "==> Configure gdbserver"'                      >> build.sh
+          echo 'cd "$OUTDIR/build-aarch64"'                          >> build.sh
+          echo "\"$GDB_SRC/gdb/gdbserver/configure\" \\ "            >> build.sh
+          echo '  --host="$TRIPLE" \\ '                              >> build.sh
+          echo '  --with-sysroot="$SYSROOT" \\ '                     >> build.sh
+          echo '  --prefix="$INSTALL_PREFIX" \\ '                    >> build.sh
+          echo '  --disable-nls \\ '                                 >> build.sh
+          echo '  --disable-sim'                                     >> build.sh
+          echo 'echo "==> Build gdbserver"'                          >> build.sh
+          echo 'make -j"$(nproc)" CC="$CC" CXX="$CXX" AR="$AR" RANLIB="$RANLIB" STRIP="$STRIP" CFLAGS="$CFLAGS" LDFLAGS="$LDFLAGS"' >> build.sh
+          echo 'echo "==> Install gdbserver"'                        >> build.sh
+          echo 'make install'                                        >> build.sh
+          echo 'if [[ -x "$INSTALL_PREFIX/bin/gdbserver" ]]; then "$STRIP" "$INSTALL_PREFIX/bin/gdbserver" || true; fi' >> build.sh
+          echo 'echo "==> Done: $INSTALL_PREFIX/bin/gdbserver"'      >> build.sh
+          chmod +x build.sh
+
+      - name: Build
+        env:
+          OUTDIR: ${{ env.OUTDIR }}
+        run: |
+          API="${{ inputs.api_level }}" STATIC="${{ inputs.static_pie }}" bash ./build.sh
+          file "$OUTDIR/aarch64-linux-android/bin/gdbserver" || true
+          ldd  "$OUTDIR/aarch64-linux-android/bin/gdbserver" || true || echo "Static PIE may show no libs (expected)"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdbserver-aarch64-gdb${{ inputs.gdb_version }}-ndk${{ inputs.ndk_version }}-api${{ inputs.api_level }}
+          path: |
+            out/aarch64-linux-android/bin/gdbserver
