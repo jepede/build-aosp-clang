@@ -87,6 +87,7 @@ jobs:
           TC="$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64"
           TRIPLE="aarch64-linux-android${API}"
           TARGET="aarch64-linux-android"
+          BUILD_TRIPLE="$(gcc -dumpmachine || echo x86_64-pc-linux-gnu)"
           
           export PATH="$TC/bin:$PATH"
           export CC="$TC/bin/${TRIPLE}-clang"
@@ -98,42 +99,53 @@ jobs:
           export READELF="$TC/bin/llvm-readelf"
           export OBJCOPY="$TC/bin/llvm-objcopy"
           export OBJDUMP="$TC/bin/llvm-objdump"
+          
+          # 交叉编译避免误探测宿主
           export PKG_CONFIG_LIBDIR=
           export PKG_CONFIG_PATH=
           
-          LDFLAGS_EXTRA="${{ inputs.extra_ldflags }}"
+          # 额外参数（来自 inputs）
           CFLAGS_EXTRA="${{ inputs.extra_cflags }}"
+          LDFLAGS_EXTRA="${{ inputs.extra_ldflags }}"
           if [ "${{ inputs.link_static }}" = "true" ]; then
             LDFLAGS_EXTRA="$LDFLAGS_EXTRA -static"
           fi
           
-          mkdir -p "$ROOTDIR/build" "$ROOTDIR/out"
+          # 推荐：告诉头文件 Android API，减少奇怪探测
+          export CPPFLAGS="-D__ANDROID_API__=${API}"
+          export CFLAGS="-O2 -fPIC -fPIE -fstack-protector-strong ${CFLAGS_EXTRA}"
+          export LDFLAGS="-pie ${LDFLAGS_EXTRA}"
           
-          # ---- 关键修正：自动探测 gdbserver 源目录（顶层 or gdb/ 子目录）----
           GDB_SRC="$ROOTDIR/gdb-${{ inputs.gdb_version }}"
-          if [ -x "$GDB_SRC/gdbserver/configure" ]; then
-            SRCDIR="$GDB_SRC/gdbserver"                 # 新布局：gdbserver/（GDB ≥ 10）
-          elif [ -x "$GDB_SRC/gdb/gdbserver/configure" ]; then
-            SRCDIR="$GDB_SRC/gdb/gdbserver"             # 旧布局：gdb/gdbserver/
-          else
-            echo "找不到 gdbserver 源目录（既没有 gdbserver/ 也没有 gdb/gdbserver/）"
-            echo "实际解包内容："; ls -la "$GDB_SRC" | head -n 200
-            exit 1
-          fi
-          cd "$SRCDIR"
+          cd "$GDB_SRC"
           
-          # 按官方推荐 cross 方式直接在 gdbserver 子目录 configure（对 Android 最省事）
-          CC_FOR_BUILD=gcc \
-          CFLAGS="$CFLAGS_EXTRA" \
-          LDFLAGS="$LDFLAGS_EXTRA" \
-          ./configure --host="$TARGET" --disable-nls
+          # 顶层 configure：仅准备 gdbserver 所需，关闭其它组件/依赖
+          ./configure \
+            --build="${BUILD_TRIPLE}" \
+            --host="${TARGET}" \
+            --target="${TARGET}" \
+            --disable-gdb \
+            --disable-binutils \
+            --disable-gas \
+            --disable-ld \
+            --disable-gold \
+            --disable-sim \
+            --disable-nls \
+            --without-python \
+            --without-guile \
+            --without-babeltrace \
+            --without-libunwind-ia64 \
+            --without-lzma \
+            --without-xxhash
           
-          make -j"$(nproc)"
+          # 只编 gdbserver（会自动先生成 gnulib 相关文件）
+          make -j"$(nproc)" all-gdbserver
           
-          cp -f gdbserver "$ROOTDIR/out/gdbserver-aarch64"
+          # 取出产物并 strip
+          cp -f gdbserver/gdbserver "$ROOTDIR/out/gdbserver-aarch64"
           "$STRIP" -s "$ROOTDIR/out/gdbserver-aarch64" || true
           
-          file "$ROOTDIR/out/gdbserver-aarch64"
+          file "$ROOTDIR/out/gdbserver-aarch64" || true
           echo "Built gdbserver:"
           "$READELF" -h "$ROOTDIR/out/gdbserver-aarch64" | head -n 30 || true
 
