@@ -100,26 +100,26 @@ jobs:
           export OBJCOPY="$TC/bin/llvm-objcopy"
           export OBJDUMP="$TC/bin/llvm-objdump"
           
-          # 交叉编译避免误探测宿主
+          # 避免宿主 pkg-config 干扰
           export PKG_CONFIG_LIBDIR=
           export PKG_CONFIG_PATH=
           
-          # 额外参数（来自 inputs）
+          # 你的可选输入
           CFLAGS_EXTRA="${{ inputs.extra_cflags }}"
           LDFLAGS_EXTRA="${{ inputs.extra_ldflags }}"
           if [ "${{ inputs.link_static }}" = "true" ]; then
             LDFLAGS_EXTRA="$LDFLAGS_EXTRA -static"
           fi
           
-          # 推荐：告诉头文件 Android API，减少奇怪探测
-          export CPPFLAGS="-D__ANDROID_API__=${API}"
-          export CFLAGS="-O2 -fPIC -fPIE -fstack-protector-strong ${CFLAGS_EXTRA}"
+          # 关键：别再手动定义 __ANDROID_API__；并强制包含 <limits.h> 修复 LONG_MIN
+          export CPPFLAGS="-include limits.h"
+          export CFLAGS="-O2 -fPIC -fPIE -fstack-protector-strong -Wno-unknown-warning-option ${CFLAGS_EXTRA}"
           export LDFLAGS="-pie ${LDFLAGS_EXTRA}"
           
           GDB_SRC="$ROOTDIR/gdb-${{ inputs.gdb_version }}"
           cd "$GDB_SRC"
           
-          # 顶层 configure：仅准备 gdbserver 所需，关闭其它组件/依赖
+          # 顶层 configure，only gdbserver。这样会先把 gnulib 配好，避免 Makefile.gnulib.inc 缺失
           ./configure \
             --build="${BUILD_TRIPLE}" \
             --host="${TARGET}" \
@@ -138,15 +138,13 @@ jobs:
             --without-lzma \
             --without-xxhash
           
-          # 只编 gdbserver（会自动先生成 gnulib 相关文件）
+          # 只编 gdbserver（会自动先生成 gnulib/…）
           make -j"$(nproc)" all-gdbserver
           
-          # 取出产物并 strip
+          # 产物
           cp -f gdbserver/gdbserver "$ROOTDIR/out/gdbserver-aarch64"
           "$STRIP" -s "$ROOTDIR/out/gdbserver-aarch64" || true
-          
           file "$ROOTDIR/out/gdbserver-aarch64" || true
-          echo "Built gdbserver:"
           "$READELF" -h "$ROOTDIR/out/gdbserver-aarch64" | head -n 30 || true
 
       - name: Pack artifact
