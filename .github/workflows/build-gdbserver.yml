@@ -83,11 +83,11 @@ jobs:
       - name: Configure & build gdbserver (cross-compile)
         run: |
           set -eux
-          API="${{ steps.tc.outputs.api }}"
-          TC="${{ steps.tc.outputs.tc }}"
-          TRIPLE="${{ steps.tc.outputs.TRIPLE }}"
-          TARGET="${{ env.TARGET }}"
-
+          API="${{ inputs.android_api }}"
+          TC="$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64"
+          TRIPLE="aarch64-linux-android${API}"
+          TARGET="aarch64-linux-android"
+          
           export PATH="$TC/bin:$PATH"
           export CC="$TC/bin/${TRIPLE}-clang"
           export CXX="$TC/bin/${TRIPLE}-clang++"
@@ -98,37 +98,41 @@ jobs:
           export READELF="$TC/bin/llvm-readelf"
           export OBJCOPY="$TC/bin/llvm-objcopy"
           export OBJDUMP="$TC/bin/llvm-objdump"
-
-          # 交叉编译尽量避免误探测宿主库
           export PKG_CONFIG_LIBDIR=
           export PKG_CONFIG_PATH=
-
-          # 可选静态链接（不保证成功，按 NDK 静态库可用性决定）
+          
           LDFLAGS_EXTRA="${{ inputs.extra_ldflags }}"
           CFLAGS_EXTRA="${{ inputs.extra_cflags }}"
           if [ "${{ inputs.link_static }}" = "true" ]; then
             LDFLAGS_EXTRA="$LDFLAGS_EXTRA -static"
           fi
-
+          
           mkdir -p "$ROOTDIR/build" "$ROOTDIR/out"
-          cd "gdb-${{ inputs.gdb_version }}/gdb/gdbserver"
-
-          # 注意：gdbserver 有独立的 configure，可直接 --host 交叉
-          # 关闭 NLS 避免本地化依赖；其余保持最小化
+          
+          # ---- 关键修正：自动探测 gdbserver 源目录（顶层 or gdb/ 子目录）----
+          GDB_SRC="$ROOTDIR/gdb-${{ inputs.gdb_version }}"
+          if [ -x "$GDB_SRC/gdbserver/configure" ]; then
+            SRCDIR="$GDB_SRC/gdbserver"                 # 新布局：gdbserver/（GDB ≥ 10）
+          elif [ -x "$GDB_SRC/gdb/gdbserver/configure" ]; then
+            SRCDIR="$GDB_SRC/gdb/gdbserver"             # 旧布局：gdb/gdbserver/
+          else
+            echo "找不到 gdbserver 源目录（既没有 gdbserver/ 也没有 gdb/gdbserver/）"
+            echo "实际解包内容："; ls -la "$GDB_SRC" | head -n 200
+            exit 1
+          fi
+          cd "$SRCDIR"
+          
+          # 按官方推荐 cross 方式直接在 gdbserver 子目录 configure（对 Android 最省事）
           CC_FOR_BUILD=gcc \
           CFLAGS="$CFLAGS_EXTRA" \
           LDFLAGS="$LDFLAGS_EXTRA" \
-          ./configure \
-            --host="$TARGET" \
-            --disable-nls
-
-          # 编译
+          ./configure --host="$TARGET" --disable-nls
+          
           make -j"$(nproc)"
-
-          # 结果复制与 strip
+          
           cp -f gdbserver "$ROOTDIR/out/gdbserver-aarch64"
           "$STRIP" -s "$ROOTDIR/out/gdbserver-aarch64" || true
-
+          
           file "$ROOTDIR/out/gdbserver-aarch64"
           echo "Built gdbserver:"
           "$READELF" -h "$ROOTDIR/out/gdbserver-aarch64" | head -n 30 || true
