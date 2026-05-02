@@ -1,65 +1,81 @@
-name: 构建 AOSP Clang（Android arm64，NDK 可选）
-run-name: 构建 AOSP Clang → aarch64-android（NDK ${{ inputs.ndk_version }}，${{ inputs.aosp_rev }}）
+name: 构建 AOSP Clang Android arm64
+
+run-name: 构建 AOSP Clang ${{ inputs.aosp_rev }} -> Android arm64 / NDK ${{ inputs.ndk_version }}
 
 on:
   workflow_dispatch:
     inputs:
       ndk_version:
-        description: "NDK 版本（如 r28c）"
+        description: "NDK 版本，例如 r28c"
         default: "r28c"
         required: true
+
       aosp_rev:
-        description: "AOSP Clang 提交号（rXXXXXXx，如 r416183b）"
+        description: "AOSP Clang 版本，例如 r416183b"
         default: "r416183b"
         required: true
+
       android_platform:
-        description: "Android API（最低21，建议24+）"
+        description: "Android API，例如 23 / 24 / 30"
         default: "30"
         required: true
+
       llvm_project_ref:
-        description: "可选：toolchain/llvm-project 的分支/提交"
+        description: "可选：toolchain/llvm-project 提交/分支；留空时 r416183b 自动使用固定提交"
         default: ""
         required: false
+
       llvm_android_ref:
-        description: "可选：toolchain/llvm_android 的分支/提交"
+        description: "可选：toolchain/llvm_android 提交/分支；留空时 r416183b 自动使用固定提交"
         default: ""
         required: false
+
+      ninja_jobs:
+        description: "Ninja 并行数；GitHub 标准 runner 建议 1 或 2"
+        default: "2"
+        required: true
+
+      xz_level:
+        description: "xz 压缩等级；建议 3~6，不要太高"
+        default: "6"
+        required: true
 
 permissions:
   contents: read
 
+concurrency:
+  group: aosp-clang-${{ github.ref }}-${{ inputs.aosp_rev }}-${{ inputs.ndk_version }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-24.04
-    # ↑ 提高总超时时间，避免长时间编译被系统裁掉
     timeout-minutes: 360
+
     env:
       ROOTDIR: ${{ github.workspace }}
-      TARGET_TRIPLE: aarch64-linux-android
-      INSTALL_DIR: ${{ github.workspace }}/stage/aarch64-linux-android
-      BUILD_DIR: ${{ github.workspace }}/build
       SRC_DIR: ${{ github.workspace }}/src
+      HOST_BUILD_DIR: ${{ github.workspace }}/build-host-tools
+      BUILD_DIR: ${{ github.workspace }}/build-android
+      INSTALL_DIR: ${{ github.workspace }}/stage/aarch64-linux-android
+      OUT_DIR: ${{ github.workspace }}/out
+      TARGET_TRIPLE: aarch64-linux-android
       NDK_VERSION: ${{ inputs.ndk_version }}
-      # ↓ 统一限制并行；Ninja 仍再加 -j/-l 双保险
-      CMAKE_BUILD_PARALLEL_LEVEL: 3
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CMAKE_BUILD_PARALLEL_LEVEL: ${{ inputs.ninja_jobs }}
+
     steps:
       - name: 最大化可用磁盘空间与 Swap
         uses: easimon/maximize-build-space@v10
         with:
-          root-reserve-mb: 4096
-          swap-size-mb: 12288     # ↑ 12G，抗内存峰值
+          root-reserve-mb: 6144
+          temp-reserve-mb: 1024
+          swap-size-mb: 12288
           remove-dotnet: true
           remove-android: true
           remove-haskell: true
           remove-codeql: true
           remove-docker-images: true
-
-      - name: 资源自检（磁盘/内存/句柄）
-        run: |
-          set -eux
-          df -h
-          free -h || true
-          ulimit -n 1048576 || true
 
       - name: 检出当前仓库
         uses: actions/checkout@v4
@@ -69,121 +85,250 @@ jobs:
 
       - name: 安装依赖
         run: |
+          set -eux
           sudo apt-get update -y
-          sudo apt-get install -y ninja-build cmake xz-utils unzip git curl file tree pkg-config jq patch ccache
-
-      # ↓ ccache 缓存：失败后二次构建基本“秒补”
-      - name: 缓存 ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ccache
-          key: ${{ runner.os }}-ccache-aosp-llvm-${{ hashFiles('**/CMakeLists.txt','**/*.cmake') }}-${{ inputs.aosp_rev }}-${{ inputs.ndk_version }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-aosp-llvm-
+          sudo apt-get install -y \
+            ninja-build \
+            cmake \
+            xz-utils \
+            unzip \
+            git \
+            curl \
+            file \
+            tree \
+            pkg-config \
+            jq \
+            patch \
+            ccache \
+            python3
 
       - name: 启用 ccache
         uses: hendrikmuhs/ccache-action@v1.2.18
         with:
-          key: aosp-llvm
+          key: aosp-clang-${{ inputs.aosp_rev }}-${{ inputs.ndk_version }}-android-arm64
+          max-size: 2G
 
-      - name: 下载并解压 NDK（${{ inputs.ndk_version }}）
+      - name: 资源自检
         run: |
           set -eux
-          curl -fsSL -o android-ndk.zip "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
-          unzip -q android-ndk.zip -d "$ROOTDIR"
-          rm -f android-ndk.zip
-          ln -s "$ROOTDIR/android-ndk-${NDK_VERSION}" "$ROOTDIR/ndk"
+          df -h
+          free -h || true
+          nproc || true
+          ulimit -n 1048576 || true
+          ccache --version || true
+          cmake --version
+          ninja --version
+
+      - name: 下载并解压 NDK
+        run: |
+          set -eux
+
+          curl -fsSL \
+            -o "$ROOTDIR/android-ndk.zip" \
+            "https://dl.google.com/android/repository/android-ndk-${NDK_VERSION}-linux.zip"
+
+          unzip -q "$ROOTDIR/android-ndk.zip" -d "$ROOTDIR"
+          rm -f "$ROOTDIR/android-ndk.zip"
+
+          ln -sfn "$ROOTDIR/android-ndk-${NDK_VERSION}" "$ROOTDIR/ndk"
+
           ls -la "$ROOTDIR/ndk"
+          ls -la "$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" | head -80
 
-      - name: 克隆 AOSP 源码（llvm-project / llvm_android）
+      - name: 克隆 AOSP LLVM 源码并锁定版本
+        env:
+          AOSP_REV: ${{ inputs.aosp_rev }}
+          INPUT_LLVM_PROJECT_REF: ${{ inputs.llvm_project_ref }}
+          INPUT_LLVM_ANDROID_REF: ${{ inputs.llvm_android_ref }}
         run: |
           set -eux
-          mkdir -p "$SRC_DIR"
-          git clone --depth 1 https://android.googlesource.com/toolchain/llvm-project "$SRC_DIR/llvm-project"
-          if [ -n "${{ inputs.llvm_project_ref }}" ]; then
-            git -C "$SRC_DIR/llvm-project" fetch --depth 1 origin "${{ inputs.llvm_project_ref }}"
-            git -C "$SRC_DIR/llvm-project" checkout FETCH_HEAD
-          fi
-          git clone --depth 1 https://android.googlesource.com/toolchain/llvm_android "$SRC_DIR/llvm_android"
-          if [ -n "${{ inputs.llvm_android_ref }}" ]; then
-            git -C "$SRC_DIR/llvm_android" fetch --depth 1 origin "${{ inputs.llvm_android_ref }}"
-            git -C "$SRC_DIR/llvm_android" checkout FETCH_HEAD
-          fi
-          echo "llvm-project @ $(git -C "$SRC_DIR/llvm-project" rev-parse --short HEAD)"
-          echo "llvm_android @ $(git -C "$SRC_DIR/llvm_android" rev-parse --short HEAD)"
 
-      - name: 解析 r 版本并自动应用补丁（纯 Shell + jq）
+          mkdir -p "$SRC_DIR"
+
+          LLVM_PROJECT_REF="$INPUT_LLVM_PROJECT_REF"
+          LLVM_ANDROID_REF="$INPUT_LLVM_ANDROID_REF"
+
+          case "$AOSP_REV" in
+            r416183b)
+              if [ -z "$LLVM_PROJECT_REF" ]; then
+                LLVM_PROJECT_REF="c935d99d7cf2016289302412d708641d52d2f7ee"
+              fi
+
+              if [ -z "$LLVM_ANDROID_REF" ]; then
+                LLVM_ANDROID_REF="07e984be2f6074fb044e0ae06b9027f350fe8844"
+              fi
+              ;;
+            *)
+              if [ -z "$LLVM_PROJECT_REF" ] || [ -z "$LLVM_ANDROID_REF" ]; then
+                echo "当前只内置了 r416183b 的固定提交。"
+                echo "如果你要编译 $AOSP_REV，请手动填写 llvm_project_ref 和 llvm_android_ref。"
+                exit 1
+              fi
+              ;;
+          esac
+
+          echo "AOSP_REV=$AOSP_REV"
+          echo "LLVM_PROJECT_REF=$LLVM_PROJECT_REF"
+          echo "LLVM_ANDROID_REF=$LLVM_ANDROID_REF"
+
+          git init "$SRC_DIR/llvm-project"
+          git -C "$SRC_DIR/llvm-project" remote add origin https://android.googlesource.com/toolchain/llvm-project
+          git -C "$SRC_DIR/llvm-project" fetch --depth 1 origin "$LLVM_PROJECT_REF"
+          git -C "$SRC_DIR/llvm-project" checkout --detach FETCH_HEAD
+
+          git init "$SRC_DIR/llvm_android"
+          git -C "$SRC_DIR/llvm_android" remote add origin https://android.googlesource.com/toolchain/llvm_android
+          git -C "$SRC_DIR/llvm_android" fetch --depth 1 origin "$LLVM_ANDROID_REF"
+          git -C "$SRC_DIR/llvm_android" checkout --detach FETCH_HEAD
+
+          echo "llvm-project full sha:"
+          git -C "$SRC_DIR/llvm-project" rev-parse HEAD
+
+          echo "llvm_android full sha:"
+          git -C "$SRC_DIR/llvm_android" rev-parse HEAD
+
+      - name: 应用 AOSP llvm_android 补丁
         env:
           AOSP_REV: ${{ inputs.aosp_rev }}
         run: |
           set -eux
+
           REV_NUM="$(echo "$AOSP_REV" | sed -E 's/^r([0-9]+).*/\1/')"
-          test -n "$REV_NUM" || (echo "无法从 ${AOSP_REV} 解析 svn 版本号" && exit 1)
-          echo "svn_version = $REV_NUM"
+
+          if [ -z "$REV_NUM" ]; then
+            echo "无法从 $AOSP_REV 解析版本号"
+            exit 1
+          fi
+
+          echo "svn revision = $REV_NUM"
 
           PATCH_ROOT="$SRC_DIR/llvm_android/patches"
           PATCHES_JSON="$PATCH_ROOT/PATCHES.json"
-          test -f "$PATCHES_JSON" || (echo "找不到 PATCHES.json: $PATCHES_JSON" && exit 1)
+
+          if [ ! -f "$PATCHES_JSON" ]; then
+            echo "找不到 PATCHES.json: $PATCHES_JSON"
+            exit 1
+          fi
 
           git -C "$SRC_DIR/llvm-project" reset --hard
           git -C "$SRC_DIR/llvm-project" clean -fdx
           git -C "$SRC_DIR/llvm-project" config user.email "actions@github.com"
-          git -C "$SRC_DIR/llvm-project" config user.name  "GitHub Actions"
+          git -C "$SRC_DIR/llvm-project" config user.name "GitHub Actions"
 
-          mapfile -t PATCHES < <(jq -r --argjson R "$REV_NUM" '
-            .[] | . as $e
-            | ( ($e.start_version // -1) <= $R and $R <= ($e.end_version // 99999999) )
-            | if . then ($e.patch // $e.path // "") else "" end
-            ' "$PATCHES_JSON" \
-            | sed '/^$/d' \
-            | while read -r p; do
-                [ -f "$PATCH_ROOT/$p" ] && echo "$p" || true
-              done)
+          mapfile -t PATCHES < <(
+            jq -r --argjson R "$REV_NUM" '
+              .[]
+              | select((.platforms // ["android"]) | index("android"))
+              | (.version_range.from // .start_version // -1) as $from
+              | (.version_range.until // .end_version // null) as $until
+              | select(($from <= $R) and (($until == null) or ($R < $until)))
+              | (.rel_patch_path // .patch // .path // empty)
+            ' "$PATCHES_JSON" | sed '/^$/d'
+          )
 
-          echo "将应用补丁数量：${#PATCHES[@]}"
+          echo "候选补丁数量: ${#PATCHES[@]}"
+
           for p in "${PATCHES[@]}"; do
             PP="$PATCH_ROOT/$p"
+
+            if [ ! -f "$PP" ]; then
+              echo "跳过不存在的补丁: $p"
+              continue
+            fi
+
             echo ">> 应用补丁: $p"
+
             if git -C "$SRC_DIR/llvm-project" am --keep-cr "$PP"; then
               continue
+            fi
+
+            git -C "$SRC_DIR/llvm-project" am --abort || true
+
+            if patch -p1 --forward --input="$PP" -d "$SRC_DIR/llvm-project"; then
+              echo "patch fallback 成功: $p"
             else
-              git -C "$SRC_DIR/llvm-project" am --abort || true
-              patch -p1 --forward --input="$PP" -d "$SRC_DIR/llvm-project"
+              echo "补丁失败: $p"
+              exit 1
             fi
           done
 
-      - name: 配置（CMake + NDK 交叉构建到 aarch64-android）
+          echo "补丁应用完成"
+          git -C "$SRC_DIR/llvm-project" status --short
+
+      - name: 构建 native TableGen 工具
+        run: |
+          set -eux
+
+          mkdir -p "$HOST_BUILD_DIR"
+
+          cmake -S "$SRC_DIR/llvm-project/llvm" -B "$HOST_BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS="clang" \
+            -DLLVM_TARGETS_TO_BUILD="AArch64" \
+            -DLLVM_INCLUDE_EXAMPLES=OFF \
+            -DLLVM_INCLUDE_TESTS=OFF \
+            -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DCLANG_INCLUDE_TESTS=OFF \
+            -DLLVM_ENABLE_ASSERTIONS=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_BINDINGS=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+          ninja -C "$HOST_BUILD_DIR" -j"${{ inputs.ninja_jobs }}" -l"${{ inputs.ninja_jobs }}" llvm-tblgen clang-tblgen
+
+          test -x "$HOST_BUILD_DIR/bin/llvm-tblgen"
+          test -x "$HOST_BUILD_DIR/bin/clang-tblgen"
+
+          file "$HOST_BUILD_DIR/bin/llvm-tblgen"
+          file "$HOST_BUILD_DIR/bin/clang-tblgen"
+
+      - name: 配置 Android arm64 交叉构建
         env:
           ANDROID_NDK_HOME: ${{ github.workspace }}/ndk
           ANDROID_NDK_ROOT: ${{ github.workspace }}/ndk
         run: |
           set -eux
+
           API="${{ inputs.android_platform }}"
           TOOLCHAIN="$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64"
-          export CC="${TOOLCHAIN}/bin/${TARGET_TRIPLE}${API}-clang"
-          export CXX="${TOOLCHAIN}/bin/${TARGET_TRIPLE}${API}-clang++"
-          export AR="${TOOLCHAIN}/bin/llvm-ar"
-          export RANLIB="${TOOLCHAIN}/bin/llvm-ranlib"
-          export STRIP="${TOOLCHAIN}/bin/llvm-strip"
-          export LD="${TOOLCHAIN}/bin/ld.lld"
+
+          export CC="$TOOLCHAIN/bin/${TARGET_TRIPLE}${API}-clang"
+          export CXX="$TOOLCHAIN/bin/${TARGET_TRIPLE}${API}-clang++"
+          export AR="$TOOLCHAIN/bin/llvm-ar"
+          export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+          export STRIP="$TOOLCHAIN/bin/llvm-strip"
+          export LD="$TOOLCHAIN/bin/ld.lld"
 
           mkdir -p "$BUILD_DIR" "$INSTALL_DIR"
+
           cmake -S "$SRC_DIR/llvm-project/llvm" -B "$BUILD_DIR" -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$ROOTDIR/ndk/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM="${API}" \
+            -DANDROID_PLATFORM="$API" \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+            -DLLVM_NATIVE_TOOL_DIR="$HOST_BUILD_DIR/bin" \
+            -DLLVM_TABLEGEN="$HOST_BUILD_DIR/bin/llvm-tblgen" \
+            -DCLANG_TABLEGEN="$HOST_BUILD_DIR/bin/clang-tblgen" \
             -DLLVM_ENABLE_PROJECTS="clang;lld" \
             -DLLVM_TARGETS_TO_BUILD="AArch64" \
+            -DLLVM_DEFAULT_TARGET_TRIPLE="$TARGET_TRIPLE" \
             -DLLVM_INCLUDE_EXAMPLES=OFF \
             -DLLVM_INCLUDE_TESTS=OFF \
             -DLLVM_INCLUDE_BENCHMARKS=OFF \
+            -DCLANG_INCLUDE_TESTS=OFF \
             -DLLVM_ENABLE_ASSERTIONS=OFF \
-            -DLLVM_ENABLE_ZLIB=ON \
             -DLLVM_ENABLE_TERMINFO=OFF \
             -DLLVM_ENABLE_BACKTRACES=OFF \
-            -DLLVM_USE_LINKER=lld \
+            -DLLVM_ENABLE_ZLIB=OFF \
+            -DLLVM_ENABLE_ZSTD=OFF \
+            -DLLVM_ENABLE_LIBXML2=OFF \
+            -DLLVM_ENABLE_LIBEDIT=OFF \
+            -DLLVM_ENABLE_BINDINGS=OFF \
             -DLLVM_PARALLEL_LINK_JOBS=1 \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
@@ -192,57 +337,193 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -latomic" \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--gc-sections -latomic"
 
-      # ↓ keepalive 心跳日志，避免“长时间无输出”被判掉线
-      - name: 构建并安装（分步 + 限并行 + 心跳）
-        timeout-minutes: 330
+          cmake --build "$BUILD_DIR" --target help | head -200 || true
+
+      - name: 构建 clang / lld / 常用 llvm 工具
+        timeout-minutes: 300
         run: |
           set -eux
-          ( while true; do echo "::notice::keepalive $(date)"; sleep 60; done ) &
 
-          # Ninja 双保险：-j3 -l3；单目标分步构建与重试
-          ninja -C "$BUILD_DIR" -j3 -l3 clang || ninja -C "$BUILD_DIR" -j2 -l2 clang
-          ninja -C "$BUILD_DIR" -j3 -l3 lld   || ninja -C "$BUILD_DIR" -j2 -l2 lld
+          JOBS="${{ inputs.ninja_jobs }}"
 
-          cmake --install "$BUILD_DIR" --component clang || true
-          cmake --install "$BUILD_DIR" --component lld   || true
-          cmake --install "$BUILD_DIR" || true
-
-          if [ -d "$INSTALL_DIR/bin" ]; then
-            find "$INSTALL_DIR/bin" -type f -maxdepth 1 -print0 | while IFS= read -r -d '' f; do
-              if file "$f" | grep -q ELF; then
-                "$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" -s "$f" || true
-              fi
+          (
+            while true; do
+              echo "::notice::keepalive $(date)"
+              df -h || true
+              free -h || true
+              ccache -s || true
+              sleep 120
             done
+          ) &
+          KEEPALIVE_PID="$!"
+
+          cleanup() {
+            kill "$KEEPALIVE_PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          build_required() {
+            local target="$1"
+            echo "==== build required target: $target ===="
+            ninja -C "$BUILD_DIR" -j"$JOBS" -l"$JOBS" "$target"
+          }
+
+          build_optional() {
+            local target="$1"
+            echo "==== build optional target: $target ===="
+            if ninja -C "$BUILD_DIR" -j"$JOBS" -l"$JOBS" "$target"; then
+              echo "optional target ok: $target"
+            else
+              echo "optional target skipped/failed: $target"
+            fi
+          }
+
+          build_required clang
+          build_required lld
+
+          build_optional clang-resource-headers
+          build_optional llvm-ar
+          build_optional llvm-ranlib
+          build_optional llvm-strip
+          build_optional llvm-nm
+          build_optional llvm-objdump
+          build_optional llvm-readelf
+          build_optional llvm-objcopy
+          build_optional llvm-size
+          build_optional llvm-strings
+
+          ccache -s || true
+
+      - name: 整理最小可用工具链目录
+        run: |
+          set -eux
+
+          rm -rf "$INSTALL_DIR"
+          mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/lib" "$INSTALL_DIR/share"
+
+          copy_bin() {
+            local name="$1"
+            if [ -f "$BUILD_DIR/bin/$name" ]; then
+              cp -a "$BUILD_DIR/bin/$name" "$INSTALL_DIR/bin/$name"
+              return 0
+            fi
+            return 1
+          }
+
+          copy_bin clang
+          copy_bin lld
+
+          copy_bin clang++ || ln -s clang "$INSTALL_DIR/bin/clang++"
+          copy_bin clang-cpp || true
+
+          copy_bin ld.lld || ln -s lld "$INSTALL_DIR/bin/ld.lld"
+          copy_bin ld64.lld || true
+          copy_bin wasm-ld || true
+
+          copy_bin llvm-ar || true
+          copy_bin llvm-ranlib || true
+          copy_bin llvm-strip || true
+          copy_bin llvm-nm || true
+          copy_bin llvm-objdump || true
+          copy_bin llvm-readelf || true
+          copy_bin llvm-objcopy || true
+          copy_bin llvm-size || true
+          copy_bin llvm-strings || true
+
+          if [ -d "$BUILD_DIR/lib/clang" ]; then
+            cp -a "$BUILD_DIR/lib/clang" "$INSTALL_DIR/lib/"
+          else
+            echo "警告：没有找到 $BUILD_DIR/lib/clang"
+            echo "尝试手动整理 clang resource headers"
+
+            VERSION_INC="$(find "$BUILD_DIR" -path '*/clang/Basic/Version.inc' | head -n 1 || true)"
+
+            if [ -n "$VERSION_INC" ] && [ -f "$VERSION_INC" ]; then
+              MAJOR="$(grep 'CLANG_VERSION_MAJOR' "$VERSION_INC" | awk '{print $3}' | tr -d '"')"
+              MINOR="$(grep 'CLANG_VERSION_MINOR' "$VERSION_INC" | awk '{print $3}' | tr -d '"')"
+              PATCH="$(grep 'CLANG_VERSION_PATCHLEVEL' "$VERSION_INC" | awk '{print $3}' | tr -d '"')"
+              CLANG_VER="${MAJOR}.${MINOR}.${PATCH}"
+            else
+              CLANG_VER="unknown"
+            fi
+
+            mkdir -p "$INSTALL_DIR/lib/clang/$CLANG_VER/include"
+            cp -a "$SRC_DIR/llvm-project/clang/lib/Headers/." "$INSTALL_DIR/lib/clang/$CLANG_VER/include/"
           fi
-          tree -L 3 "$INSTALL_DIR" || true
+
+          cat > "$INSTALL_DIR/README.txt" <<EOF
+          AOSP Clang Android arm64 build
+
+          aosp_rev: ${{ inputs.aosp_rev }}
+          ndk_version: ${{ inputs.ndk_version }}
+          android_platform: ${{ inputs.android_platform }}
+          target_triple: $TARGET_TRIPLE
+
+          注意：
+          1. 这里产物是 Android arm64 ELF，不能直接在 GitHub Ubuntu runner 上执行。
+          2. bin/clang、bin/lld 应放到 Android arm64 环境运行。
+          3. lib/clang 是 clang resource dir，不能删。
+          EOF
+
+          echo "==== staged files ===="
+          tree -L 4 "$INSTALL_DIR" || true
+
+          echo "==== ELF check ===="
+          find "$INSTALL_DIR/bin" -maxdepth 1 -type f -print0 | while IFS= read -r -d '' f; do
+            echo "---- $f"
+            file "$f" || true
+          done
+
+          echo "==== strip Android ELF binaries ===="
+          STRIPPER="$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+
+          find "$INSTALL_DIR/bin" -maxdepth 1 -type f -print0 | while IFS= read -r -d '' f; do
+            if file "$f" | grep -q 'ELF'; then
+              "$STRIPPER" -s "$f" || true
+            fi
+          done
 
       - name: 打包
         id: pack
         run: |
           set -eux
-          API="${{ inputs.android_platform }}"
-          TAR_NAME="aosp-clang-${{ inputs.aosp_rev }}-android-aarch64-ndk-${NDK_VERSION}-api${API}"
-          echo "tar_name=${TAR_NAME}" >> "$GITHUB_OUTPUT"
-          mkdir -p "$ROOTDIR/out"
-          (cd "$(dirname "$INSTALL_DIR")" && tar -c "$(basename "$INSTALL_DIR")") | xz -T0 -v > "$ROOTDIR/out/${TAR_NAME}.tar.xz"
-          ls -lh "$ROOTDIR/out/${TAR_NAME}.tar.xz"
 
-      - name: 上传构建产物到 Actions
+          API="${{ inputs.android_platform }}"
+          XZ_LEVEL="${{ inputs.xz_level }}"
+
+          mkdir -p "$OUT_DIR"
+
+          TAR_NAME="aosp-clang-${{ inputs.aosp_rev }}-android-aarch64-ndk-${NDK_VERSION}-api${API}"
+          echo "tar_name=$TAR_NAME" >> "$GITHUB_OUTPUT"
+
+          cd "$(dirname "$INSTALL_DIR")"
+
+          tar -c "$(basename "$INSTALL_DIR")" \
+            | xz -T1 "-${XZ_LEVEL}" -v \
+            > "$OUT_DIR/${TAR_NAME}.tar.xz"
+
+          ls -lh "$OUT_DIR/${TAR_NAME}.tar.xz"
+
+      - name: 上传构建产物
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.pack.outputs.tar_name }}
           path: out/${{ steps.pack.outputs.tar_name }}.tar.xz
           retention-days: 7
+          if-no-files-found: error
 
-      # ↓ 失败时把日志打包，方便二次定位（永远执行）
-      - name: 采集构建日志（失败辅助）
+      - name: 上传构建日志
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-logs
+          name: build-logs-${{ inputs.aosp_rev }}-${{ inputs.ndk_version }}
           path: |
-            ${{ env.BUILD_DIR }}/CMakeCache.txt
-            ${{ env.BUILD_DIR }}/CMakeFiles
-            ${{ env.BUILD_DIR }}/tools/**/CMakeFiles/**/build.make
-            ${{ env.BUILD_DIR }}/**/*.log
+            build-host-tools/CMakeCache.txt
+            build-host-tools/CMakeFiles/CMakeOutput.log
+            build-host-tools/CMakeFiles/CMakeError.log
+            build-android/CMakeCache.txt
+            build-android/CMakeFiles/CMakeOutput.log
+            build-android/CMakeFiles/CMakeError.log
+            build-android/**/*.log
           retention-days: 3
+          if-no-files-found: ignore
