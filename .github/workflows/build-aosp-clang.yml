@@ -3,6 +3,10 @@ name: 构建 AOSP Clang Android arm64
 run-name: 构建 AOSP Clang ${{ inputs.aosp_rev || 'r416183b' }} -> Android arm64 / NDK ${{ inputs.ndk_version || 'r28c' }}
 
 on:
+  push:
+    branches:
+      - agent/fix-aosp-clang-build
+
   workflow_dispatch:
     inputs:
       ndk_version:
@@ -466,11 +470,36 @@ jobs:
 
           copy_bin() {
             local name="$1"
-            if [ -f "$BUILD_DIR/bin/$name" ]; then
-              cp -a "$BUILD_DIR/bin/$name" "$INSTALL_DIR/bin/$name"
-              return 0
+            local src="$BUILD_DIR/bin/$name"
+            local dest="$INSTALL_DIR/bin/$name"
+
+            if [ ! -e "$src" ] && [ ! -L "$src" ]; then
+              return 1
             fi
-            return 1
+
+            if [ -L "$src" ]; then
+              local resolved
+              local target_name
+
+              if ! resolved="$(readlink -f "$src")"; then
+                echo "无法解析符号链接: $src -> $(readlink "$src")"
+                return 1
+              fi
+              if [ ! -f "$resolved" ]; then
+                echo "符号链接目标不存在: $src -> $(readlink "$src")"
+                return 1
+              fi
+
+              target_name="$(basename "$resolved")"
+              if [ ! -e "$INSTALL_DIR/bin/$target_name" ]; then
+                cp -a "$resolved" "$INSTALL_DIR/bin/$target_name"
+              fi
+              ln -sfn "$target_name" "$dest"
+            else
+              cp -a "$src" "$dest"
+            fi
+
+            return 0
           }
 
           copy_bin clang
@@ -546,12 +575,31 @@ jobs:
             fi
           done
 
-          test -x "$INSTALL_DIR/bin/clang"
-          test -x "$INSTALL_DIR/bin/lld"
-          test -d "$INSTALL_DIR/lib/clang"
+          mapfile -d '' -t DANGLING_LINKS < <(
+            find "$INSTALL_DIR/bin" -maxdepth 1 -xtype l -print0
+          )
+          if [ "${#DANGLING_LINKS[@]}" -ne 0 ]; then
+            printf '发现悬空符号链接: %s\n' "${DANGLING_LINKS[@]}"
+            exit 1
+          fi
+
+          for required_bin in clang lld; do
+            if [ ! -x "$INSTALL_DIR/bin/$required_bin" ]; then
+              echo "必需工具不可执行或不存在: $INSTALL_DIR/bin/$required_bin"
+              exit 1
+            fi
+          done
+
+          if [ ! -d "$INSTALL_DIR/lib/clang" ]; then
+            echo "缺少 clang resource 目录: $INSTALL_DIR/lib/clang"
+            exit 1
+          fi
 
           RESOURCE_STDDEF="$(find "$INSTALL_DIR/lib/clang" -path '*/include/stddef.h' -print -quit)"
-          test -n "$RESOURCE_STDDEF"
+          if [ -z "$RESOURCE_STDDEF" ]; then
+            echo "clang resource headers 中缺少 stddef.h"
+            exit 1
+          fi
 
           READELF="$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           "$READELF" -h "$INSTALL_DIR/bin/clang" | grep -E 'Class:|Machine:'
