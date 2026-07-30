@@ -3,10 +3,6 @@ name: 构建 AOSP Clang Android arm64
 run-name: 构建 AOSP Clang ${{ inputs.aosp_rev || 'r416183b' }} -> Android arm64 / NDK ${{ inputs.ndk_version || 'r28c' }}
 
 on:
-  push:
-    branches:
-      - agent/fix-aosp-clang-build
-
   workflow_dispatch:
     inputs:
       ndk_version:
