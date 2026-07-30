@@ -1,12 +1,8 @@
 name: 构建 AOSP Clang Android arm64
 
-run-name: 构建 AOSP Clang ${{ inputs.aosp_rev || 'r487747c' }} -> Android arm64 / NDK ${{ inputs.ndk_version || 'r28c' }}
+run-name: 构建 AOSP Clang ${{ inputs.aosp_rev || 'r416183b' }} -> Android arm64 / NDK ${{ inputs.ndk_version || 'r28c' }}
 
 on:
-  push:
-    branches:
-      - agent/fix-aosp-clang-build
-
   workflow_dispatch:
     inputs:
       ndk_version:
@@ -48,7 +44,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aosp-clang-${{ github.ref }}-${{ inputs.aosp_rev || 'r487747c' }}-${{ inputs.ndk_version || 'r28c' }}
+  group: aosp-clang-${{ github.ref }}-${{ inputs.aosp_rev || 'r416183b' }}-${{ inputs.ndk_version || 'r28c' }}
   cancel-in-progress: false
 
 jobs:
@@ -64,7 +60,7 @@ jobs:
       INSTALL_DIR: ${{ github.workspace }}/stage/aarch64-linux-android
       OUT_DIR: ${{ github.workspace }}/out
       TARGET_TRIPLE: aarch64-linux-android
-      AOSP_REV: ${{ inputs.aosp_rev || 'r487747c' }}
+      AOSP_REV: ${{ inputs.aosp_rev || 'r416183b' }}
       NDK_VERSION: ${{ inputs.ndk_version || 'r28c' }}
       ANDROID_PLATFORM: ${{ inputs.android_platform || '30' }}
       NINJA_JOBS: ${{ inputs.ninja_jobs || '1' }}
