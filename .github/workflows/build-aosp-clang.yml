@@ -1,6 +1,6 @@
 name: 构建 AOSP Clang Android arm64
 
-run-name: 构建 AOSP Clang ${{ inputs.aosp_rev }} -> Android arm64 / NDK ${{ inputs.ndk_version }}
+run-name: 构建 AOSP Clang ${{ inputs.aosp_rev || 'r416183b' }} -> Android arm64 / NDK ${{ inputs.ndk_version || 'r28c' }}
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ on:
 
       ninja_jobs:
         description: "Ninja 并行数；GitHub 标准 runner 建议 1 或 2"
-        default: "2"
+        default: "1"
         required: true
 
       xz_level:
@@ -40,11 +40,17 @@ on:
         default: "6"
         required: true
 
+  push:
+    branches:
+      - agent/fix-aosp-clang-build
+    paths:
+      - .github/workflows/build-aosp-clang.yml
+
 permissions:
   contents: read
 
 concurrency:
-  group: aosp-clang-${{ github.ref }}-${{ inputs.aosp_rev }}-${{ inputs.ndk_version }}
+  group: aosp-clang-${{ github.ref }}-${{ inputs.aosp_rev || 'r416183b' }}-${{ inputs.ndk_version || 'r28c' }}
   cancel-in-progress: false
 
 jobs:
@@ -60,9 +66,13 @@ jobs:
       INSTALL_DIR: ${{ github.workspace }}/stage/aarch64-linux-android
       OUT_DIR: ${{ github.workspace }}/out
       TARGET_TRIPLE: aarch64-linux-android
-      NDK_VERSION: ${{ inputs.ndk_version }}
+      AOSP_REV: ${{ inputs.aosp_rev || 'r416183b' }}
+      NDK_VERSION: ${{ inputs.ndk_version || 'r28c' }}
+      ANDROID_PLATFORM: ${{ inputs.android_platform || '30' }}
+      NINJA_JOBS: ${{ inputs.ninja_jobs || '1' }}
+      XZ_LEVEL: ${{ inputs.xz_level || '6' }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CMAKE_BUILD_PARALLEL_LEVEL: ${{ inputs.ninja_jobs }}
+      CMAKE_BUILD_PARALLEL_LEVEL: ${{ inputs.ninja_jobs || '1' }}
 
     steps:
       - name: 最大化可用磁盘空间与 Swap
@@ -78,14 +88,14 @@ jobs:
           remove-docker-images: true
 
       - name: 检出当前仓库
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
           submodules: recursive
 
       - name: 安装依赖
         run: |
-          set -eux
+          set -euo pipefail
           sudo apt-get update -y
           sudo apt-get install -y \
             ninja-build \
@@ -102,15 +112,50 @@ jobs:
             ccache \
             python3
 
+      - name: 校验构建输入
+        run: |
+          set -euo pipefail
+
+          [[ "$NDK_VERSION" =~ ^r[0-9]+[a-z]?$ ]] || {
+            echo "无效 NDK_VERSION: $NDK_VERSION"
+            exit 1
+          }
+
+          [[ "$AOSP_REV" =~ ^r[0-9]+[a-z]?$ ]] || {
+            echo "无效 AOSP_REV: $AOSP_REV"
+            exit 1
+          }
+
+          [[ "$ANDROID_PLATFORM" =~ ^[0-9]+$ ]] || {
+            echo "无效 ANDROID_PLATFORM: $ANDROID_PLATFORM"
+            exit 1
+          }
+
+          [[ "$NINJA_JOBS" =~ ^[0-9]+$ ]] && [ "$NINJA_JOBS" -ge 1 ] && [ "$NINJA_JOBS" -le 4 ] || {
+            echo "NINJA_JOBS 必须是 1~4"
+            exit 1
+          }
+
+          [[ "$XZ_LEVEL" =~ ^[0-9]+$ ]] && [ "$XZ_LEVEL" -ge 0 ] && [ "$XZ_LEVEL" -le 9 ] || {
+            echo "XZ_LEVEL 必须是 0~9"
+            exit 1
+          }
+
+          echo "AOSP_REV=$AOSP_REV"
+          echo "NDK_VERSION=$NDK_VERSION"
+          echo "ANDROID_PLATFORM=$ANDROID_PLATFORM"
+          echo "NINJA_JOBS=$NINJA_JOBS"
+          echo "XZ_LEVEL=$XZ_LEVEL"
+
       - name: 启用 ccache
-        uses: hendrikmuhs/ccache-action@v1.2.18
+        uses: hendrikmuhs/ccache-action@v1.2.23
         with:
-          key: aosp-clang-${{ inputs.aosp_rev }}-${{ inputs.ndk_version }}-android-arm64
+          key: aosp-clang-${{ env.AOSP_REV }}-${{ env.NDK_VERSION }}-android-arm64
           max-size: 2G
 
       - name: 资源自检
         run: |
-          set -eux
+          set -euo pipefail
           df -h
           free -h || true
           nproc || true
@@ -121,7 +166,7 @@ jobs:
 
       - name: 下载并解压 NDK
         run: |
-          set -eux
+          set -euo pipefail
 
           curl -fsSL \
             -o "$ROOTDIR/android-ndk.zip" \
@@ -133,15 +178,14 @@ jobs:
           ln -sfn "$ROOTDIR/android-ndk-${NDK_VERSION}" "$ROOTDIR/ndk"
 
           ls -la "$ROOTDIR/ndk"
-          ls -la "$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" | head -80
+          ls -la "$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin" | sed -n '1,80p'
 
       - name: 克隆 AOSP LLVM 源码并锁定版本
         env:
-          AOSP_REV: ${{ inputs.aosp_rev }}
           INPUT_LLVM_PROJECT_REF: ${{ inputs.llvm_project_ref }}
           INPUT_LLVM_ANDROID_REF: ${{ inputs.llvm_android_ref }}
         run: |
-          set -eux
+          set -euo pipefail
 
           mkdir -p "$SRC_DIR"
 
@@ -188,10 +232,8 @@ jobs:
           git -C "$SRC_DIR/llvm_android" rev-parse HEAD
 
       - name: 应用 AOSP llvm_android 补丁
-        env:
-          AOSP_REV: ${{ inputs.aosp_rev }}
         run: |
-          set -eux
+          set -euo pipefail
 
           REV_NUM="$(echo "$AOSP_REV" | sed -E 's/^r([0-9]+).*/\1/')"
 
@@ -255,9 +297,36 @@ jobs:
           echo "补丁应用完成"
           git -C "$SRC_DIR/llvm-project" status --short
 
+      - name: 修复旧 LLVM 宿主编译兼容性
+        run: |
+          set -euo pipefail
+
+          SIGNALS_H="$SRC_DIR/llvm-project/llvm/include/llvm/Support/Signals.h"
+          test -f "$SIGNALS_H"
+
+          python3 - "$SIGNALS_H" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          text = path.read_text(encoding="utf-8")
+
+          if "#include <cstdint>\n" not in text:
+              marker = "#include <string>\n"
+              if marker not in text:
+                  raise SystemExit(f"找不到插入位置: {path}")
+              text = text.replace(marker, "#include <cstdint>\n" + marker, 1)
+              path.write_text(text, encoding="utf-8")
+
+          if "#include <cstdint>\n" not in path.read_text(encoding="utf-8"):
+              raise SystemExit(f"宿主兼容补丁应用失败: {path}")
+          PY
+
+          grep -n -E '^#include <(cstdint|string)>$' "$SIGNALS_H"
+
       - name: 构建 native TableGen 工具
         run: |
-          set -eux
+          set -euo pipefail
 
           mkdir -p "$HOST_BUILD_DIR"
 
@@ -278,7 +347,7 @@ jobs:
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
-          ninja -C "$HOST_BUILD_DIR" -j"${{ inputs.ninja_jobs }}" -l"${{ inputs.ninja_jobs }}" llvm-tblgen clang-tblgen
+          ninja -C "$HOST_BUILD_DIR" -j"$NINJA_JOBS" -l"$NINJA_JOBS" llvm-tblgen clang-tblgen
 
           test -x "$HOST_BUILD_DIR/bin/llvm-tblgen"
           test -x "$HOST_BUILD_DIR/bin/clang-tblgen"
@@ -291,9 +360,9 @@ jobs:
           ANDROID_NDK_HOME: ${{ github.workspace }}/ndk
           ANDROID_NDK_ROOT: ${{ github.workspace }}/ndk
         run: |
-          set -eux
+          set -euo pipefail
 
-          API="${{ inputs.android_platform }}"
+          API="$ANDROID_PLATFORM"
           TOOLCHAIN="$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64"
 
           export CC="$TOOLCHAIN/bin/${TARGET_TRIPLE}${API}-clang"
@@ -337,14 +406,14 @@ jobs:
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -latomic" \
             -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--gc-sections -latomic"
 
-          cmake --build "$BUILD_DIR" --target help | head -200 || true
+          cmake --build "$BUILD_DIR" --target help | sed -n '1,200p' || true
 
       - name: 构建 clang / lld / 常用 llvm 工具
         timeout-minutes: 300
         run: |
-          set -eux
+          set -euo pipefail
 
-          JOBS="${{ inputs.ninja_jobs }}"
+          JOBS="$NINJA_JOBS"
 
           (
             while true; do
@@ -396,7 +465,7 @@ jobs:
 
       - name: 整理最小可用工具链目录
         run: |
-          set -eux
+          set -euo pipefail
 
           rm -rf "$INSTALL_DIR"
           mkdir -p "$INSTALL_DIR/bin" "$INSTALL_DIR/lib" "$INSTALL_DIR/share"
@@ -436,7 +505,7 @@ jobs:
             echo "警告：没有找到 $BUILD_DIR/lib/clang"
             echo "尝试手动整理 clang resource headers"
 
-            VERSION_INC="$(find "$BUILD_DIR" -path '*/clang/Basic/Version.inc' | head -n 1 || true)"
+            VERSION_INC="$(find "$BUILD_DIR" -path '*/clang/Basic/Version.inc' -print -quit)"
 
             if [ -n "$VERSION_INC" ] && [ -f "$VERSION_INC" ]; then
               MAJOR="$(grep 'CLANG_VERSION_MAJOR' "$VERSION_INC" | awk '{print $3}' | tr -d '"')"
@@ -454,9 +523,9 @@ jobs:
           cat > "$INSTALL_DIR/README.txt" <<EOF
           AOSP Clang Android arm64 build
 
-          aosp_rev: ${{ inputs.aosp_rev }}
-          ndk_version: ${{ inputs.ndk_version }}
-          android_platform: ${{ inputs.android_platform }}
+          aosp_rev: $AOSP_REV
+          ndk_version: $NDK_VERSION
+          android_platform: $ANDROID_PLATFORM
           target_triple: $TARGET_TRIPLE
 
           注意：
@@ -483,17 +552,27 @@ jobs:
             fi
           done
 
+          test -x "$INSTALL_DIR/bin/clang"
+          test -x "$INSTALL_DIR/bin/lld"
+          test -d "$INSTALL_DIR/lib/clang"
+
+          RESOURCE_STDDEF="$(find "$INSTALL_DIR/lib/clang" -path '*/include/stddef.h' -print -quit)"
+          test -n "$RESOURCE_STDDEF"
+
+          READELF="$ROOTDIR/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          "$READELF" -h "$INSTALL_DIR/bin/clang" | grep -E 'Class:|Machine:'
+          "$READELF" -h "$INSTALL_DIR/bin/lld" | grep -E 'Class:|Machine:'
+
       - name: 打包
         id: pack
         run: |
-          set -eux
+          set -euo pipefail
 
-          API="${{ inputs.android_platform }}"
-          XZ_LEVEL="${{ inputs.xz_level }}"
+          API="$ANDROID_PLATFORM"
 
           mkdir -p "$OUT_DIR"
 
-          TAR_NAME="aosp-clang-${{ inputs.aosp_rev }}-android-aarch64-ndk-${NDK_VERSION}-api${API}"
+          TAR_NAME="aosp-clang-${AOSP_REV}-android-aarch64-ndk-${NDK_VERSION}-api${API}"
           echo "tar_name=$TAR_NAME" >> "$GITHUB_OUTPUT"
 
           cd "$(dirname "$INSTALL_DIR")"
@@ -505,7 +584,7 @@ jobs:
           ls -lh "$OUT_DIR/${TAR_NAME}.tar.xz"
 
       - name: 上传构建产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.pack.outputs.tar_name }}
           path: out/${{ steps.pack.outputs.tar_name }}.tar.xz
@@ -514,9 +593,9 @@ jobs:
 
       - name: 上传构建日志
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: build-logs-${{ inputs.aosp_rev }}-${{ inputs.ndk_version }}
+          name: build-logs-${{ env.AOSP_REV }}-${{ env.NDK_VERSION }}
           path: |
             build-host-tools/CMakeCache.txt
             build-host-tools/CMakeFiles/CMakeOutput.log
@@ -525,5 +604,5 @@ jobs:
             build-android/CMakeFiles/CMakeOutput.log
             build-android/CMakeFiles/CMakeError.log
             build-android/**/*.log
-          retention-days: 3
+          retention-days: 30
           if-no-files-found: ignore
