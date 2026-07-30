@@ -40,12 +40,6 @@ on:
         default: "6"
         required: true
 
-  push:
-    branches:
-      - agent/fix-aosp-clang-build
-    paths:
-      - .github/workflows/build-aosp-clang.yml
-
 permissions:
   contents: read
 
