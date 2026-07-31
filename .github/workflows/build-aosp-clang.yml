@@ -1,8 +1,12 @@
 name: 构建 AOSP Clang Android arm64
 
-run-name: 构建 AOSP Clang ${{ inputs.aosp_rev || 'r416183b' }} -> Android arm64 / NDK ${{ inputs.ndk_version || 'r28c' }}
+run-name: 构建 AOSP Clang ${{ inputs.aosp_rev || 'r510928' }} -> Android arm64 / NDK ${{ inputs.ndk_version || 'r28c' }}
 
 on:
+  push:
+    branches:
+      - agent/fix-aosp-clang-build
+
   workflow_dispatch:
     inputs:
       ndk_version:
@@ -11,7 +15,7 @@ on:
         required: true
 
       aosp_rev:
-        description: "AOSP Clang 版本，例如 r416183b / r450784e / r487747c"
+        description: "AOSP Clang 版本，例如 r416183b / r450784e / r487747c / r510928"
         default: "r416183b"
         required: true
 
@@ -44,7 +48,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: aosp-clang-${{ github.ref }}-${{ inputs.aosp_rev || 'r416183b' }}-${{ inputs.ndk_version || 'r28c' }}
+  group: aosp-clang-${{ github.ref }}-${{ inputs.aosp_rev || 'r510928' }}-${{ inputs.ndk_version || 'r28c' }}
   cancel-in-progress: false
 
 jobs:
@@ -60,7 +64,7 @@ jobs:
       INSTALL_DIR: ${{ github.workspace }}/stage/aarch64-linux-android
       OUT_DIR: ${{ github.workspace }}/out
       TARGET_TRIPLE: aarch64-linux-android
-      AOSP_REV: ${{ inputs.aosp_rev || 'r416183b' }}
+      AOSP_REV: ${{ inputs.aosp_rev || 'r510928' }}
       NDK_VERSION: ${{ inputs.ndk_version || 'r28c' }}
       ANDROID_PLATFORM: ${{ inputs.android_platform || '30' }}
       NINJA_JOBS: ${{ inputs.ninja_jobs || '1' }}
@@ -214,9 +218,18 @@ jobs:
                 LLVM_ANDROID_REF="8443a75fcd5c80245b194f6510b98a11098fe7fe"
               fi
               ;;
+            r510928)
+              if [ -z "$LLVM_PROJECT_REF" ]; then
+                LLVM_PROJECT_REF="477610d4d0d988e69dbc3fae4fe86bff3f07f2b5"
+              fi
+
+              if [ -z "$LLVM_ANDROID_REF" ]; then
+                LLVM_ANDROID_REF="32255e163e2fad02be80c2308344c9f9b5acc7ed"
+              fi
+              ;;
             *)
               if [ -z "$LLVM_PROJECT_REF" ] || [ -z "$LLVM_ANDROID_REF" ]; then
-                echo "当前内置了 r416183b、r450784e、r487747c 的固定提交。"
+                echo "当前内置了 r416183b、r450784e、r487747c、r510928 的固定提交。"
                 echo "如果你要编译 $AOSP_REV，请手动填写 llvm_project_ref 和 llvm_android_ref。"
                 exit 1
               fi
