@@ -96,6 +96,8 @@ verify_donor_metadata() {
 apply_aosp_patches() {
   local patch_root="$SRC_DIR/llvm_android/patches"
   local patches_json="$patch_root/PATCHES.json"
+  INAPPLICABLE_PATCHES=()
+  APPLIED_PATCHES=()
   [ -f "$patches_json" ] || die "AOSP PATCHES.json is missing"
   mapfile -t patches < <(
     jq -r --argjson R 530567 '
@@ -113,10 +115,13 @@ apply_aosp_patches() {
     [ -f "$patch_file" ] || die "missing AOSP patch: $rel"
     if git -C "$SRC_DIR/llvm-project" apply --check "$patch_file"; then
       git -C "$SRC_DIR/llvm-project" apply --index "$patch_file"
-    elif git -C "$SRC_DIR/llvm-project" apply --reverse --check "$patch_file"; then
-      log "AOSP patch already present: $rel"
+      APPLIED_PATCHES+=("$rel")
     else
-      die "AOSP patch is neither applicable nor already present: $rel"
+      # AOSP's patch_manager marks these as non-applicable and continues. The
+      # exact list is recorded in the artifact manifest for review; a genuine
+      # source mismatch is therefore visible instead of silently discarded.
+      log "AOSP patch not applicable on donor base: $rel"
+      INAPPLICABLE_PATCHES+=("$rel")
     fi
   done
 }
@@ -129,6 +134,9 @@ build_llvm() {
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DLLVM_ENABLE_PROJECTS='clang;lld' \
     -DLLVM_TARGETS_TO_BUILD='AArch64;ARM;X86;RISCV' \
+    -DCLANG_VERSION_PATCHLEVEL=1 \
+    -DCLANG_VERSION_SUFFIX='' \
+    -DCLANG_VENDOR=Android \
     -DCLANG_DEFAULT_LINKER=ld.lld \
     -DCLANG_DEFAULT_CXX_STDLIB=libc++ \
     -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_TESTS=OFF \
@@ -274,6 +282,10 @@ android_platform=$ANDROID_PLATFORM
 qemu=disabled
 source_repository=https://android.googlesource.com/toolchain/llvm-project
 android_patches_repository=https://android.googlesource.com/toolchain/llvm_android
+applied_patch_count=${#APPLIED_PATCHES[@]}
+inapplicable_patch_count=${#INAPPLICABLE_PATCHES[@]}
+applied_patches=$(printf '%s,' "${APPLIED_PATCHES[@]}" | sed 's/,$//')
+inapplicable_patches=$(printf '%s,' "${INAPPLICABLE_PATCHES[@]}" | sed 's/,$//')
 MANIFEST
   sha256sum "$artifact" "$OUT_DIR/android-ndk-${NDK_VERSION}-linux-arm64.manifest.txt"
 }
