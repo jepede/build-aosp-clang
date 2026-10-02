@@ -111,8 +111,13 @@ apply_aosp_patches() {
   for rel in "${patches[@]}"; do
     local patch_file="$patch_root/$rel"
     [ -f "$patch_file" ] || die "missing AOSP patch: $rel"
-    git -C "$SRC_DIR/llvm-project" apply --check "$patch_file" || die "failed to apply AOSP patch: $rel"
-    git -C "$SRC_DIR/llvm-project" apply --index "$patch_file"
+    if git -C "$SRC_DIR/llvm-project" apply --check "$patch_file"; then
+      git -C "$SRC_DIR/llvm-project" apply --index "$patch_file"
+    elif git -C "$SRC_DIR/llvm-project" apply --reverse --check "$patch_file"; then
+      log "AOSP patch already present: $rel"
+    else
+      die "AOSP patch is neither applicable nor already present: $rel"
+    fi
   done
 }
 
