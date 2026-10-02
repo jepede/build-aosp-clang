@@ -11,10 +11,11 @@ NDK_SHA1=a7b54a5de87fecd125a17d54f73c446199e72a64
 NDK_SIZE=722261334
 # These refs are the exact revisions recorded by the official r28c donor NDK:
 # clang_source_info.md -> llvm-project base 3b5e7c83... and llvm_android
-# patch repository e727bfb0.... The llvm-project merge commit contains that
-# base plus the Android branch changes used to produce clang-r530567e.
+# patch repository e727bfb0.... This is the source selection used by AOSP's
+# toolchain builder; the prebuilt manifest's later merge ref is not the source
+# revision recorded by the donor compiler.
 AOSP_REV=r530567e
-LLVM_PROJECT_REF=97a699bf4812a18fb657c2779f5296a4ab2694d2
+LLVM_PROJECT_REF=3b5e7c83a6e226d5bd7ed2e9b67449b64812074c
 LLVM_ANDROID_REF=e727bfb014bd436f581a66a450c939a6983a1fc3
 ANDROID_PLATFORM="${ANDROID_PLATFORM:-24}"
 JOBS="${JOBS:-2}"
@@ -87,9 +88,8 @@ verify_donor_metadata() {
   grep -Fq 'based on r530567e' "$donor/AndroidVersion.txt" || die "official donor revision mismatch"
   grep -Fq '3b5e7c83a6e226d5bd7ed2e9b67449b64812074c' "$donor/clang_source_info.md" || die "official donor base commit mismatch"
   grep -Fq 'e727bfb014bd436f581a66a450c939a6983a1fc3' "$donor/clang_source_info.md" || die "official donor patch commit mismatch"
-  git -C "$SRC_DIR/llvm-project" cat-file -p "$LLVM_PROJECT_REF" \
-    | sed -n 's/^parent //p' | grep -qx '3b5e7c83a6e226d5bd7ed2e9b67449b64812074c' \
-    || die "llvm-project merge does not contain the donor base commit"
+  git -C "$SRC_DIR/llvm-project" cat-file -e "$LLVM_PROJECT_REF^{commit}" \
+    || die "llvm-project donor base commit is missing"
   git -C "$SRC_DIR/llvm_android" cat-file -e "$LLVM_ANDROID_REF^{commit}"
 }
 
@@ -128,14 +128,13 @@ build_llvm() {
     -DCMAKE_INSTALL_PREFIX="$LLVM_INSTALL" \
     -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ \
     -DLLVM_ENABLE_PROJECTS='clang;lld' \
-    -DLLVM_TARGETS_TO_BUILD=AArch64 \
-    -DLLVM_DEFAULT_TARGET_TRIPLE=aarch64-linux-android \
+    -DLLVM_TARGETS_TO_BUILD='AArch64;ARM;X86;RISCV' \
     -DCLANG_DEFAULT_LINKER=ld.lld \
     -DCLANG_DEFAULT_CXX_STDLIB=libc++ \
     -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_TESTS=OFF \
     -DLLVM_INCLUDE_BENCHMARKS=OFF -DCLANG_INCLUDE_TESTS=OFF \
     -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_TERMINFO=OFF \
-    -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF \
+    -DLLVM_ENABLE_ZLIB=ON -DLLVM_ENABLE_ZSTD=ON \
     -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_LIBEDIT=OFF \
     -DLLVM_ENABLE_BINDINGS=OFF -DLLVM_ENABLE_LTO=OFF \
     -DLLVM_BUILD_TOOLS=ON -DLLVM_INSTALL_TOOLCHAIN_ONLY=ON \
