@@ -9,9 +9,13 @@ ROOTDIR="${ROOTDIR:-$(pwd)}"
 NDK_VERSION=r28c
 NDK_SHA1=a7b54a5de87fecd125a17d54f73c446199e72a64
 NDK_SIZE=722261334
-AOSP_REV=r416183b
-LLVM_PROJECT_REF=c935d99d7cf2016289302412d708641d52d2f7ee
-LLVM_ANDROID_REF=07e984be2f6074fb044e0ae06b9027f350fe8844
+# These refs are the exact revisions recorded by the official r28c donor NDK:
+# clang_source_info.md -> llvm-project base 3b5e7c83... and llvm_android
+# patch repository e727bfb0.... The llvm-project merge commit contains that
+# base plus the Android branch changes used to produce clang-r530567e.
+AOSP_REV=r530567e
+LLVM_PROJECT_REF=97a699bf4812a18fb657c2779f5296a4ab2694d2
+LLVM_ANDROID_REF=e727bfb014bd436f581a66a450c939a6983a1fc3
 ANDROID_PLATFORM="${ANDROID_PLATFORM:-24}"
 JOBS="${JOBS:-2}"
 
@@ -70,21 +74,31 @@ fetch_fixed_repo() {
 }
 
 fetch_sources() {
-  log "Fetching fixed AOSP LLVM sources"
+  log "Fetching fixed AOSP LLVM sources for ${AOSP_REV}"
   fetch_fixed_repo https://android.googlesource.com/toolchain/llvm-project \
     "$LLVM_PROJECT_REF" "$SRC_DIR/llvm-project"
   fetch_fixed_repo https://android.googlesource.com/toolchain/llvm_android \
     "$LLVM_ANDROID_REF" "$SRC_DIR/llvm_android"
 }
 
+verify_donor_metadata() {
+  local donor="$OFFICIAL_DIR/android-ndk-${NDK_VERSION}/toolchains/llvm/prebuilt/linux-x86_64"
+  [ "$(sed -n '1p' "$donor/AndroidVersion.txt")" = "19.0.1" ] || die "official donor LLVM version mismatch"
+  grep -Fq 'based on r530567e' "$donor/AndroidVersion.txt" || die "official donor revision mismatch"
+  grep -Fq '3b5e7c83a6e226d5bd7ed2e9b67449b64812074c' "$donor/clang_source_info.md" || die "official donor base commit mismatch"
+  grep -Fq 'e727bfb014bd436f581a66a450c939a6983a1fc3' "$donor/clang_source_info.md" || die "official donor patch commit mismatch"
+  git -C "$SRC_DIR/llvm-project" show -s --format='%P' "$LLVM_PROJECT_REF" \
+    | tr ' ' '\n' | grep -qx '3b5e7c83a6e226d5bd7ed2e9b67449b64812074c' \
+    || die "llvm-project merge does not contain the donor base commit"
+  git -C "$SRC_DIR/llvm_android" cat-file -e "$LLVM_ANDROID_REF^{commit}"
+}
+
 apply_aosp_patches() {
   local patch_root="$SRC_DIR/llvm_android/patches"
   local patches_json="$patch_root/PATCHES.json"
   [ -f "$patches_json" ] || die "AOSP PATCHES.json is missing"
-  git -C "$SRC_DIR/llvm-project" config user.email actions@github.com
-  git -C "$SRC_DIR/llvm-project" config user.name 'GitHub Actions'
   mapfile -t patches < <(
-    jq -r --argjson R 416183 '
+    jq -r --argjson R 530567 '
       .[]
       | select((.platforms // ["android"]) | index("android"))
       | (.version_range.from // .start_version // -1) as $from
@@ -97,11 +111,8 @@ apply_aosp_patches() {
   for rel in "${patches[@]}"; do
     local patch_file="$patch_root/$rel"
     [ -f "$patch_file" ] || die "missing AOSP patch: $rel"
-    if git -C "$SRC_DIR/llvm-project" am --keep-cr "$patch_file"; then
-      continue
-    fi
-    git -C "$SRC_DIR/llvm-project" am --abort || true
-    patch -p1 --forward --input="$patch_file" -d "$SRC_DIR/llvm-project" || die "failed to apply AOSP patch: $rel"
+    git -C "$SRC_DIR/llvm-project" apply --check "$patch_file" || die "failed to apply AOSP patch: $rel"
+    git -C "$SRC_DIR/llvm-project" apply --index "$patch_file"
   done
 }
 
@@ -221,10 +232,16 @@ assemble_ndk() {
   [ -x "$clang" ] || die "ARM64 clang was not staged"
   file "$clang" | grep -Eq 'ARM aarch64|AArch64' || die "staged clang is not ARM64"
   "$clang" --version | head -n 2
+  for triple in aarch64-linux-android armv7a-linux-androideabi i686-linux-android x86_64-linux-android; do
+    printf '%s\n' 'int main(void) { return 0; }' \
+      | "$tc/bin/${triple}${ANDROID_PLATFORM}-clang" \
+        --sysroot="$tc/sysroot" -x c -c -o "$WORK/${triple}.o" -
+  done
+  file "$WORK/aarch64-linux-android.o" | grep -Eq 'ARM aarch64|AArch64' || die "Android ARM64 compile probe failed"
   printf '%s\n' 'int main(void) { return 0; }' \
     | "$tc/bin/aarch64-linux-android${ANDROID_PLATFORM}-clang" \
-      --sysroot="$tc/sysroot" -x c -c -o "$WORK/probe.o" -
-  file "$WORK/probe.o" | grep -Eq 'ARM aarch64|AArch64' || die "Android ARM64 compile probe failed"
+      --sysroot="$tc/sysroot" -x c -o "$WORK/aarch64-linux-android" -
+  file "$WORK/aarch64-linux-android" | grep -Eq 'ARM aarch64|AArch64' || die "Android ARM64 link probe failed"
 
   while IFS= read -r -d '' file; do
     if file "$file" | grep -q 'x86-64'; then
@@ -259,6 +276,7 @@ MANIFEST
 
 download_official_ndk
 fetch_sources
+verify_donor_metadata
 apply_aosp_patches
 build_llvm
 assemble_ndk

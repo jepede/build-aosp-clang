@@ -12,6 +12,8 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
 
 concurrency:
   group: ndk-r28c-linux-arm64
@@ -57,6 +59,11 @@ jobs:
         run: |
           set -Eeuo pipefail
           scripts/build-ndk-arm64.sh
+
+      - name: Attest NDK artifact provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: out/android-ndk-r28c-linux-arm64.tar.xz
 
       - name: Upload NDK and manifest
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
