@@ -87,8 +87,8 @@ verify_donor_metadata() {
   grep -Fq 'based on r530567e' "$donor/AndroidVersion.txt" || die "official donor revision mismatch"
   grep -Fq '3b5e7c83a6e226d5bd7ed2e9b67449b64812074c' "$donor/clang_source_info.md" || die "official donor base commit mismatch"
   grep -Fq 'e727bfb014bd436f581a66a450c939a6983a1fc3' "$donor/clang_source_info.md" || die "official donor patch commit mismatch"
-  git -C "$SRC_DIR/llvm-project" show -s --format='%P' "$LLVM_PROJECT_REF" \
-    | tr ' ' '\n' | grep -qx '3b5e7c83a6e226d5bd7ed2e9b67449b64812074c' \
+  git -C "$SRC_DIR/llvm-project" cat-file -p "$LLVM_PROJECT_REF" \
+    | sed -n 's/^parent //p' | grep -qx '3b5e7c83a6e226d5bd7ed2e9b67449b64812074c' \
     || die "llvm-project merge does not contain the donor base commit"
   git -C "$SRC_DIR/llvm_android" cat-file -e "$LLVM_ANDROID_REF^{commit}"
 }
