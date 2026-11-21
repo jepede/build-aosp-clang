@@ -1,0 +1,79 @@
+name: Build AOSP Clang 12 Linux ARM64
+
+run-name: AOSP r416183b / 7284624 sources -> Linux ARM64
+
+on:
+  workflow_dispatch:
+    inputs:
+      ninja_jobs:
+        description: Native ARM64 build jobs (1-4)
+        default: "2"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aosp-clang-r416183b-linux-arm64
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 360
+    env:
+      JOBS: ${{ inputs.ninja_jobs }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache-linux-arm64
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPRESS: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install native Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-11 g++-11 binutils cmake ninja-build ccache \
+            git curl ca-certificates python3 xz-utils zlib1g-dev file
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache-linux-arm64
+          key: aosp-r416183b-linux-arm64-${{ hashFiles('scripts/build-aosp-clang-linux-arm64.sh') }}
+          restore-keys: aosp-r416183b-linux-arm64-
+
+      - name: Build and verify the native toolchain
+        env:
+          CC: gcc-11
+          CXX: g++-11
+        run: |
+          set -o pipefail
+          bash scripts/build-aosp-clang-linux-arm64.sh 2>&1 | tee build-linux-arm64.log
+
+      - name: Upload toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-r416183b-7284624-linux-aarch64
+          path: |
+            out/aosp-clang-r416183b-7284624-linux-aarch64.tar.xz
+            out/aosp-clang-r416183b-7284624-linux-aarch64.tar.xz.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-r416183b-linux-arm64-build-evidence
+          path: |
+            build-linux-arm64.log
+            .aosp-clang-linux-arm64-work/build/CMakeCache.txt
+            .aosp-clang-linux-arm64-work/build/CMakeFiles/CMakeOutput.log
+            .aosp-clang-linux-arm64-work/build/CMakeFiles/CMakeError.log
+            .aosp-clang-linux-arm64-work/stage/clang-r416183b-linux-aarch64/BUILD_INFO.json
+            .aosp-clang-linux-arm64-work/stage/clang-r416183b-linux-aarch64/smoke-results.json
+            .aosp-clang-linux-arm64-work/patch-manager.log
+          if-no-files-found: ignore
+          retention-days: 30
