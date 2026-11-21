@@ -13,6 +13,8 @@ def main():
     stage = Path(sys.argv[1]).resolve()
     bindir = stage / 'bin'
     env = dict(os.environ, PATH=str(bindir) + os.pathsep + os.environ['PATH'])
+    gcc_prefix = os.environ.get('HOST_GCC_TOOLCHAIN')
+    native_flags = ['--gcc-toolchain=' + gcc_prefix] if gcc_prefix else []
     results = []
 
     def run(args, expected=None, cwd=None):
@@ -50,11 +52,11 @@ def main():
             work = Path(temporary)
             native_c = work / 'native.c'
             native_c.write_text('#include <stdio.h>\nint main(void) { puts("clang12-native-ok"); return 0; }\n')
-            run([tool('clang'), native_c, '-o', work / 'native'])
+            run([tool('clang'), *native_flags, native_c, '-o', work / 'native'])
             run([work / 'native'], r'clang12-native-ok')
             native_cxx = work / 'native.cpp'
             native_cxx.write_text('#include <vector>\n#include <numeric>\nint main() { std::vector<int> v{1, 2, 3}; return std::accumulate(v.begin(), v.end(), 0) != 6; }\n')
-            run([tool('clang++'), native_cxx, '-o', work / 'native-cxx'])
+            run([tool('clang++'), *native_flags, native_cxx, '-o', work / 'native-cxx'])
             run([work / 'native-cxx'])
 
             kernel_c = work / 'kernel.c'

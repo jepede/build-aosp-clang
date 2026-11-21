@@ -68,3 +68,8 @@ To rerun validation against an extracted package:
 ```sh
 python3 scripts/smoke-clang-linux-arm64.py /absolute/path/to/clang-r416183b-linux-aarch64
 ```
+
+If the host has several GCC installations and Clang selects one lacking C++
+headers, set `HOST_GCC_TOOLCHAIN` to a complete GCC prefix when running the
+verification script. This adds Clang's `--gcc-toolchain` option to the native
+C/C++ probes; the freestanding kernel probes retain their original settings.
