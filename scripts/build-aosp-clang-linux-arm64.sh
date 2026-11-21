@@ -83,7 +83,7 @@ cmake -S "$SRC_DIR/llvm-project/llvm" -B "$BUILD_DIR" -G Ninja \
   '-DCLANG_VENDOR=Android (7284624 source, Linux arm64 rebuild, based on r416183b)' \
   -DCLANG_REPOSITORY_STRING=https://android.googlesource.com/toolchain/llvm-project \
   -DCLANG_DEFAULT_LINKER=lld \
-  -DLLVM_USE_NEWPM=ON \
+  -DLLVM_USE_NEWPM=OFF \
   -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_LTO=OFF \
   -DLLVM_BUILD_LLVM_DYLIB=OFF -DLLVM_LINK_LLVM_DYLIB=OFF \
   -DLLVM_ENABLE_TERMINFO=OFF -DLLVM_ENABLE_LIBXML2=OFF \
