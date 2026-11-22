@@ -153,4 +153,17 @@ archive=aosp-clang-r416183b-7284624-linux-aarch64.tar.xz
 tar -C "$(dirname "$STAGE_DIR")" -c "$(basename "$STAGE_DIR")" \
   | xz -T1 -3 > "$OUT_DIR/$archive"
 (cd "$OUT_DIR" && sha256sum "$archive" > "$archive.sha256")
-ls -lh "$OUT_DIR/$archive" "$OUT_DIR/$archive.sha256"
+stat -c '%s' "$OUT_DIR/$archive" > "$OUT_DIR/$archive.size"
+# Artifact archives have a 512 MB connector limit. 95 MiB raw chunks keep
+# each independently downloadable zip around 100 MB and easier to recover.
+split -b 95m -d -a 2 "$OUT_DIR/$archive" "$OUT_DIR/$archive.part."
+(cd "$OUT_DIR" && sha256sum "$archive".part.* > "$archive.parts.sha256")
+part_count=$(find "$OUT_DIR" -maxdepth 1 -type f -name "$archive.part.*" | wc -l)
+test "$part_count" -ge 1 && test "$part_count" -le 16 \
+  || die "archive needs $part_count parts; increase upload steps before publishing"
+printf 'Archive: %s | Bytes: %s | Parts: %s\n' \
+  "$archive" "$(cat "$OUT_DIR/$archive.size")" "$part_count"
+# Do not upload one large archive: the parts and manifests are the deliverable.
+rm "$OUT_DIR/$archive"
+ls -lh "$OUT_DIR/$archive.sha256" "$OUT_DIR/$archive.size" \
+  "$OUT_DIR/$archive.parts.sha256" "$OUT_DIR/$archive".part.*
