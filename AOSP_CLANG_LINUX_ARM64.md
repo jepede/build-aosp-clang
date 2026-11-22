@@ -28,15 +28,28 @@ The pinned AOSP patch manager applies patches with `--failure_mode fail`.
 
 ## Download and use
 
-Download `aosp-clang-r416183b-7284624-linux-aarch64` from the successful
-workflow run, then verify and extract its archive:
+Download the `aosp-clang-r416183b-linux-aarch64-manifest` artifact and
+every `aosp-clang-r416183b-linux-aarch64-part-NN` artifact from a **successful**
+workflow run. Unzip each artifact into the same working directory. Each part
+contains one raw file ending in `.tar.xz.part.NN`; the manifest supplies the
+original archive byte count and SHA256, and checksums for every part.
+Do not download an older Android/Bionic compiler or omit any chunk.
 
 ```sh
-sha256sum -c aosp-clang-r416183b-7284624-linux-aarch64.tar.xz.sha256
-tar -xf aosp-clang-r416183b-7284624-linux-aarch64.tar.xz
+base=aosp-clang-r416183b-7284624-linux-aarch64.tar.xz
+sha256sum -c "$base.parts.sha256"
+cat "$base".part.* > "$base"
+test "$(stat -c%s "$base")" = "$(cat "$base.size")"
+sha256sum -c "$base.sha256"
+tar -xf "$base"
 export PATH="$PWD/clang-r416183b-linux-aarch64/bin:$PATH"
 clang --version
+ld.lld --version
 ```
+
+For the post-extraction smoke test, run
+`python3 scripts/smoke-clang-linux-arm64.py "$PWD/clang-r416183b-linux-aarch64"`
+on a Linux AArch64/glibc host with GCC and standard native build dependencies.
 
 For a kernel tree supporting the LLVM variables:
 
