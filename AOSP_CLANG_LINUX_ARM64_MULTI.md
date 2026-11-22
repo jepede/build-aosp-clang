@@ -11,15 +11,17 @@ bootstrap LLVM, but all resulting Clang/LLD executables target native AArch64.
 | Revision | Clang | Official Android build | Status / source |
 | --- | --- | --- | --- |
 | r416183b | 12.0.5 | 7284624 | Built and smoke-tested: [run 44970015495](https://github.com/jepede/build-aosp-clang/actions/runs/44970015495) |
-| r450784e | 14.0.7 | 8508608 | [multi-version build](https://github.com/jepede/build-aosp-clang/actions/runs/44984024201) |
-| r487747c | 17.0.2 | 10087095 | same run |
-| r510928 | 18.0.0 | 11368308 | same run |
-| r536225 | 19.0.1 | 12833971 | same run |
-| r584948c | 22.0.1 | 15323222 | same run |
+| r450784e | 14.0.7 | 8508608 | **PASS** — [run 44999143557](https://github.com/jepede/build-aosp-clang/actions/runs/44999143557), 84/84 smoke, 2 parts, SHA256 verified |
+| r487747c | 17.0.2 | 10087095 | **PASS**, 84/84 smoke, 2 parts, SHA256 verified |
+| r510928 | 18.0.0 | 11368308 | **PASS**, 84/84 smoke, 2 parts, SHA256 verified |
+| r536225 | 19.0.1 | 12833971 | **PASS**, 84/84 smoke, 2 parts, SHA256 verified |
+| r584948c | 22.0.1 | 15323222 | **PASS**, 84/84 smoke, 2 parts, SHA256 verified |
 
-The first has been verified successfully; **all later versions must pass their
-individual GitHub Actions job, smoke tests and SHA256 verification before they
-are regarded as finished**. Source locks exist in `source-locks/r*.json`;
+All six requested versions have passed native AArch64/glibc verification.
+The original Clang 12 was reused from its successful run without recompilation.
+The other five passed their own GitHub Actions jobs, 84/84 smoke tests each,
+outer Artifact ZIP SHA256 checks, 95 MiB raw part checks, original TAR/XZ
+SHA256+size checks, and 16 AArch64 ELF/glibc interpreter checks per version. Source locks exist in `source-locks/r*.json`;
 the original, immutable official manifest location and SHA256 are embedded in
 every file. [Source lock verification run](https://github.com/jepede/build-aosp-clang/actions/runs/44983855258).
 
@@ -37,8 +39,26 @@ Parts are at most **95 MiB**, below the connector's 512 MB limit.
 GitHub caps the actual retention period independently of the requested
 `retention-days`. Check `expires_at` on every Artifact before use.
 
-Download and unzip the **manifest artifact** and **all numbered part artifacts
-for the SAME revision/run** into `/root/work/neihe`; then run:
+For the five new versions, use the cache-aware verified restore script. It reuses
+an existing valid original archive and only downloads missing or invalid parts:
+
+```sh
+# Requires GitHub CLI (`gh auth login`) and native Linux AArch64/glibc.
+git clone https://github.com/jepede/build-aosp-clang
+cd build-aosp-clang
+for rev in r450784e r487747c r510928 r536225 r584948c; do
+  bash scripts/restore-aosp-clang-linux-arm64.sh "$rev" /root/work/neihe
+done
+```
+
+Each version's four Artifact IDs, outer/raw SHA256 digests, sizes, actual expiry,
+source pins, and all 16 binary checksums are recorded in
+[jepede/gpt-exten/ARTIFACT_CACHE.md](https://github.com/jepede/gpt-exten/blob/main/ARTIFACT_CACHE.md).
+GitHub API reported `expires_at=2027-02-20T07:38:21Z` for all five new versions;
+GitHub lowered the requested 400-day retention to the repository's 90-day limit.
+
+For manual recovery, download and unzip the manifest and both numbered parts
+from run `44999143557` for the **same** revision, then run:
 
 ```sh
 cd /root/work/neihe
