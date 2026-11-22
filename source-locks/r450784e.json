@@ -1,0 +1,18 @@
+{
+  "aosp_revision": "r450784e",
+  "clang_version": "14.0.7",
+  "llvm_revision": "450784",
+  "build_id": "8508608",
+  "host": "Linux AArch64/glibc (rebuild target)",
+  "prebuilt_branch": "master-kernel-build-2022",
+  "prebuilt_commit": "9f759dee5cdc5f85d076c642a192f6a9232f7058",
+  "manifest_name": "manifest_8508608.xml",
+  "manifest_url": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/9f759dee5cdc5f85d076c642a192f6a9232f7058/clang-r450784e/manifest_8508608.xml?format=TEXT",
+  "manifest_sha256": "dfee93dc7eafbec5e1cf9c2ce9ad6ba48c610196602a8184355293d77af64b8b",
+  "version_txt_sha256": "2cfbc868675524b56d3dcd20e4b2888886ecec016aa531230316d75e65a09f67",
+  "sources": {
+    "llvm_project": "4c603efb0cca074e9238af8b4106c30add4418f6",
+    "llvm_android": "207c6bec0197283db14f4ab1b52c4f062aaa050e",
+    "toolchain_utils": "c9cb1157f1f9cc5cd081941ba83c8d63657160d0"
+  }
+}

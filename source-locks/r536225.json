@@ -1,0 +1,18 @@
+{
+  "aosp_revision": "r536225",
+  "clang_version": "19.0.1",
+  "llvm_revision": "536225",
+  "build_id": "12833971",
+  "host": "Linux AArch64/glibc (rebuild target)",
+  "prebuilt_branch": "main",
+  "prebuilt_commit": "70a12c4fe88940ab2b0e6d763492dffa2f07e15a",
+  "manifest_name": "manifest_12833971.xml",
+  "manifest_url": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/70a12c4fe88940ab2b0e6d763492dffa2f07e15a/clang-r536225/manifest_12833971.xml?format=TEXT",
+  "manifest_sha256": "55a69b9d07388f2f834c211481c3a5a687b9eabfd438a9644faabd976203feb5",
+  "version_txt_sha256": "d81fb9cdb8b4eb5b0cfafc9e1899ecbb1ff3a6c41e9ec85ba4aac2a717536195",
+  "sources": {
+    "llvm_project": "b3a530ec6537146650e42be89f1089e9a3588460",
+    "llvm_android": "43ef7af1325b43e13d926d74a89741d4ace5fcf8",
+    "toolchain_utils": "760c253c1ed00ce9abd48f8546f08516e57485fe"
+  }
+}

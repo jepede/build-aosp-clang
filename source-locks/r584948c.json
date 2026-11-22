@@ -1,0 +1,18 @@
+{
+  "aosp_revision": "r584948c",
+  "clang_version": "22.0.1",
+  "llvm_revision": "584948",
+  "build_id": "15323222",
+  "host": "Linux AArch64/glibc (rebuild target)",
+  "prebuilt_branch": "main-kernel-2026",
+  "prebuilt_commit": "4a7d0a5e443c27d8f68fbd46abfab464e1355a69",
+  "manifest_name": "manifest_15323222.xml",
+  "manifest_url": "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+/4a7d0a5e443c27d8f68fbd46abfab464e1355a69/clang-r584948c/manifest_15323222.xml?format=TEXT",
+  "manifest_sha256": "7b0f0e2efb697612b6226ed78752f209287ff10a8ab486b22ff725246b5c575b",
+  "version_txt_sha256": "a6f2ffc5d8afdd9ccba90d41c0c9a82702d0e2a7fef184ae15b7c71c3a197e65",
+  "sources": {
+    "llvm_project": "2d65e4108033380e6fe8e08b1f1826cd2bfb0c99",
+    "llvm_android": "3d140cfa9eff0772fb63084a8313cdf144d1a2dc",
+    "toolchain_utils": "9b4f94761eea83b6edd1b59f485cddff6bd01b38"
+  }
+}
