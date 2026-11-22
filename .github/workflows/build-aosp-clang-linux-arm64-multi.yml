@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - .github/workflows/build-aosp-clang-linux-arm64-multi.yml
+      - scripts/build-aosp-clang-linux-arm64-multi.sh
+      - scripts/smoke-clang-linux-arm64-multi.py
+      - source-locks/**
   workflow_dispatch:
     inputs:
       ninja_jobs:
