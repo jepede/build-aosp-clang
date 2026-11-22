@@ -91,11 +91,26 @@ manager="$SRC_DIR/toolchain-utils/llvm_tools/patch_manager.py"
 patches="$SRC_DIR/llvm_android/patches"
 test -f "$manager" || die "Pinned AOSP patch manager missing: $manager"
 test -f "$patches/PATCHES.json" || die "Pinned AOSP PATCHES.json missing"
-python3 "$manager" --svn_version "$LLVM_REV" \
-  --patch_metadata_file "$patches/PATCHES.json" \
-  --filesdir_path "$patches" \
-  --src_path "$SRC_DIR/llvm-project" \
-  --use_src_head --failure_mode fail | tee "$WORK_DIR/patch-manager.log"
+# The official toolchain-utils patch manager has changed its CLI several
+# times. Invoke as a Python module (required by newer llvm_tools imports) and
+# pass ONLY the options recognized by this exact pinned version.
+export PYTHONPATH="$SRC_DIR/toolchain-utils${PYTHONPATH:+:$PYTHONPATH}"
+pm_help=$(python3 -m llvm_tools.patch_manager --help)
+patch_args=(--patch_metadata_file "$patches/PATCHES.json" --src_path "$SRC_DIR/llvm-project")
+if grep -q -- '--svn_version' <<< "$pm_help"; then
+  patch_args+=(--svn_version "$LLVM_REV")
+fi
+if grep -q -- '--failure_mode' <<< "$pm_help"; then
+  patch_args+=(--failure_mode fail)
+fi
+if grep -q -- '--filesdir_path' <<< "$pm_help"; then
+  patch_args+=(--filesdir_path "$patches")
+fi
+if grep -q -- '--use_src_head' <<< "$pm_help"; then
+  patch_args+=(--use_src_head)
+fi
+printf 'Patch manager options: %s\n' "${patch_args[*]}"
+python3 -m llvm_tools.patch_manager "${patch_args[@]}" | tee "$WORK_DIR/patch-manager.log"
 git -C "$SRC_DIR/llvm-project" diff --binary > "$WORK_DIR/applied-aosp-patches.diff"
 
 # Native Ubuntu AArch64 GCC builds Linux/glibc ELF, not Android/Bionic.
@@ -113,7 +128,7 @@ cmake -S "$SRC_DIR/llvm-project/llvm" -B "$BUILD_DIR" -G Ninja \
   -DLLVM_VERSION_MAJOR="$major" -DLLVM_VERSION_MINOR="$minor" \
   -DLLVM_VERSION_PATCH="$patch" -DLLVM_VERSION_SUFFIX='' \
   -DCLANG_VERSION_PATCHLEVEL="$patch" -DCLANG_VERSION_SUFFIX='' \
-  "-DCLANG_VENDOR=Android (AOSP $REVISION build $AOSP_BUILD; Linux AArch64 glibc rebuild)" \
+  -DCLANG_VENDOR=Android \\
   -DCLANG_REPOSITORY_STRING=https://android.googlesource.com/toolchain/llvm-project \
   -DCLANG_DEFAULT_LINKER=lld \
   -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_LTO=OFF \
