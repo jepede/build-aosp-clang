@@ -1,0 +1,245 @@
+name: Build AOSP Clang 14/17/18/19/22 for Linux AArch64
+run-name: Build 5 AOSP Clang kernel revisions as native Linux ARM64/glibc
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build-aosp-clang-linux-arm64-multi.yml
+  workflow_dispatch:
+    inputs:
+      ninja_jobs:
+        description: Native AArch64 compile concurrency (1-4)
+        default: "3"
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: aosp-clang-multi-linux-aarch64
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.revision }} Linux glibc
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [r450784e, r487747c, r510928, r536225, r584948c]
+    env:
+      JOBS: ${{ inputs.ninja_jobs || '3' }}
+      CC: gcc-12
+      CXX: g++-12
+      HOST_GCC_TOOLCHAIN: /usr
+      CCACHE_DIR: ${{ github.workspace }}/.ccache-${{ matrix.revision }}
+      CCACHE_MAXSIZE: 3G
+      CCACHE_COMPRESS: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install native ARM64 Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-12 g++-12 binutils cmake ninja-build ccache git curl \
+            ca-certificates python3 xz-utils zlib1g-dev file patch
+      - name: Restore version-isolated compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache-${{ matrix.revision }}
+          key: aosp-${{ matrix.revision }}-aarch64-${{ hashFiles('scripts/build-aosp-clang-linux-arm64-multi.sh') }}
+          restore-keys: aosp-${{ matrix.revision }}-aarch64-
+      - name: Shell and Python syntax preflight
+        run: |
+          bash -n scripts/build-aosp-clang-linux-arm64-multi.sh
+          python3 -m py_compile scripts/smoke-clang-linux-arm64-multi.py
+      - name: Fetch pinned AOSP sources, build, and smoke test
+        run: |
+          set -o pipefail
+          bash scripts/build-aosp-clang-linux-arm64-multi.sh '${{ matrix.revision }}' \
+            2>&1 | tee "build-${{ matrix.revision }}.log"
+      - name: Upload SHA256 and original archive metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-manifest
+          path: |
+            out/${{ matrix.revision }}/*.sha256
+            out/${{ matrix.revision }}/*.size
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-00
+          path: out/${{ matrix.revision }}/*.part.00
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 01
+        if: ${{ hashFiles('out/**/*.part.01') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-01
+          path: out/${{ matrix.revision }}/*.part.01
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 02
+        if: ${{ hashFiles('out/**/*.part.02') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-02
+          path: out/${{ matrix.revision }}/*.part.02
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 03
+        if: ${{ hashFiles('out/**/*.part.03') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-03
+          path: out/${{ matrix.revision }}/*.part.03
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 04
+        if: ${{ hashFiles('out/**/*.part.04') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-04
+          path: out/${{ matrix.revision }}/*.part.04
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 05
+        if: ${{ hashFiles('out/**/*.part.05') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-05
+          path: out/${{ matrix.revision }}/*.part.05
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 06
+        if: ${{ hashFiles('out/**/*.part.06') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-06
+          path: out/${{ matrix.revision }}/*.part.06
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 07
+        if: ${{ hashFiles('out/**/*.part.07') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-07
+          path: out/${{ matrix.revision }}/*.part.07
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 08
+        if: ${{ hashFiles('out/**/*.part.08') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-08
+          path: out/${{ matrix.revision }}/*.part.08
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 09
+        if: ${{ hashFiles('out/**/*.part.09') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-09
+          path: out/${{ matrix.revision }}/*.part.09
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 10
+        if: ${{ hashFiles('out/**/*.part.10') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-10
+          path: out/${{ matrix.revision }}/*.part.10
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 11
+        if: ${{ hashFiles('out/**/*.part.11') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-11
+          path: out/${{ matrix.revision }}/*.part.11
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 12
+        if: ${{ hashFiles('out/**/*.part.12') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-12
+          path: out/${{ matrix.revision }}/*.part.12
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 13
+        if: ${{ hashFiles('out/**/*.part.13') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-13
+          path: out/${{ matrix.revision }}/*.part.13
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 14
+        if: ${{ hashFiles('out/**/*.part.14') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-14
+          path: out/${{ matrix.revision }}/*.part.14
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload toolchain part 15
+        if: ${{ hashFiles('out/**/*.part.15') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-part-15
+          path: out/${{ matrix.revision }}/*.part.15
+          if-no-files-found: error
+          retention-days: 400
+          compression-level: 0
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-${{ matrix.revision }}-linux-aarch64-evidence
+          path: |
+            source-locks/${{ matrix.revision }}.json
+            build-${{ matrix.revision }}.log
+            .aosp-clang-${{ matrix.revision }}-work/build/CMakeCache.txt
+            .aosp-clang-${{ matrix.revision }}-work/build/CMakeFiles/CMakeError.log
+            .aosp-clang-${{ matrix.revision }}-work/stage/clang-${{ matrix.revision }}-linux-aarch64/BUILD_INFO.json
+            .aosp-clang-${{ matrix.revision }}-work/stage/clang-${{ matrix.revision }}-linux-aarch64/smoke-results.json
+            .aosp-clang-${{ matrix.revision }}-work/patch-manager.log
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 400
