@@ -128,7 +128,7 @@ cmake -S "$SRC_DIR/llvm-project/llvm" -B "$BUILD_DIR" -G Ninja \
   -DLLVM_VERSION_MAJOR="$major" -DLLVM_VERSION_MINOR="$minor" \
   -DLLVM_VERSION_PATCH="$patch" -DLLVM_VERSION_SUFFIX='' \
   -DCLANG_VERSION_PATCHLEVEL="$patch" -DCLANG_VERSION_SUFFIX='' \
-  -DCLANG_VENDOR=Android \\
+  -DCLANG_VENDOR=Android \
   -DCLANG_REPOSITORY_STRING=https://android.googlesource.com/toolchain/llvm-project \
   -DCLANG_DEFAULT_LINKER=lld \
   -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_ENABLE_LTO=OFF \
