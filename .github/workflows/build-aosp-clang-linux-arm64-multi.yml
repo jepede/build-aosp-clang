@@ -39,6 +39,14 @@ jobs:
       CCACHE_COMPRESS: "true"
     steps:
       - uses: actions/checkout@v4
+      # AOSP r584948c's pinned llvm_tools uses enum.StrEnum,
+      # which was added in Python 3.11; Ubuntu 22.04 defaults to 3.10.
+      - name: Select Python 3.12 for AOSP Clang 22
+        if: ${{ matrix.revision == 'r584948c' }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          architecture: arm64
       - name: Install native ARM64 Linux build dependencies
         run: |
           sudo apt-get update
