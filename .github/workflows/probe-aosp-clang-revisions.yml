@@ -1,0 +1,35 @@
+name: Lock AOSP Clang kernel source revisions
+run-name: Lock AOSP Clang Linux AArch64 source manifests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/probe-aosp-clang-revisions.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lock:
+    name: \${{ matrix.revision }} / source pin
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [r450784e, r487747c, r510928, r536225, r584948c]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover immutable official build manifest
+        run: |
+          set -Eeuo pipefail
+          python3 scripts/lock-aosp-clang-revision.py '\${{ matrix.revision }}'
+      - name: Publish source lock and raw manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: aosp-clang-\${{ matrix.revision }}-source-lock
+          path: out/aosp-source-locks/
+          if-no-files-found: error
+          retention-days: 1
