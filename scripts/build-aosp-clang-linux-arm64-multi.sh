@@ -94,8 +94,11 @@ test -f "$patches/PATCHES.json" || die "Pinned AOSP PATCHES.json missing"
 # The official toolchain-utils patch manager has changed its CLI several
 # times. Invoke as a Python module (required by newer llvm_tools imports) and
 # pass ONLY the options recognized by this exact pinned version.
-export PYTHONPATH="$SRC_DIR/toolchain-utils${PYTHONPATH:+:$PYTHONPATH}"
-pm_help=$(python3 -m llvm_tools.patch_manager --help)
+# Pinned toolchain-utils mixes absolute imports (failure_modes, get_llvm_hash)
+# and package imports (llvm_tools.*) across AOSP revisions. Both roots are
+# necessary; running the script directly retains the old import behavior.
+export PYTHONPATH="$SRC_DIR/toolchain-utils/llvm_tools:$SRC_DIR/toolchain-utils${PYTHONPATH:+:$PYTHONPATH}"
+pm_help=$(python3 "$manager" --help)
 patch_args=(--patch_metadata_file "$patches/PATCHES.json" --src_path "$SRC_DIR/llvm-project")
 if grep -q -- '--svn_version' <<< "$pm_help"; then
   patch_args+=(--svn_version "$LLVM_REV")
@@ -110,7 +113,7 @@ if grep -q -- '--use_src_head' <<< "$pm_help"; then
   patch_args+=(--use_src_head)
 fi
 printf 'Patch manager options: %s\n' "${patch_args[*]}"
-python3 -m llvm_tools.patch_manager "${patch_args[@]}" | tee "$WORK_DIR/patch-manager.log"
+python3 "$manager" "${patch_args[@]}" | tee "$WORK_DIR/patch-manager.log"
 git -C "$SRC_DIR/llvm-project" diff --binary > "$WORK_DIR/applied-aosp-patches.diff"
 
 # Native Ubuntu AArch64 GCC builds Linux/glibc ELF, not Android/Bionic.
