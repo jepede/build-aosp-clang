@@ -161,11 +161,22 @@ ln -s llvm-objcopy "$STAGE_DIR/bin/llvm-strip"
 ln -s llvm-symbolizer "$STAGE_DIR/bin/llvm-addr2line"
 mkdir -p "$STAGE_DIR/lib/clang" "$STAGE_DIR/share/licenses"
 cp -a "$BUILD_DIR/lib/clang/." "$STAGE_DIR/lib/clang/"
-# Older Clang drivers require a default CFI ignorelist; copy original only.
-if test -s "$SRC_DIR/llvm-project/compiler-rt/lib/cfi/cfi_blacklist.txt"; then
-  resource="$("$STAGE_DIR/bin/clang" -print-resource-dir)"
-  case "$resource" in "$STAGE_DIR"/lib/clang/*) ;; *) die "Wrong resource path: $resource";; esac
-  install -D -m 0644 "$SRC_DIR/llvm-project/compiler-rt/lib/cfi/cfi_blacklist.txt" "$resource/share/cfi_blacklist.txt"
+# The Clang driver requires the resource-dir CFI ignorelist on CFI+LTO.
+# Clang 12 uses cfi_blacklist.txt; Clang 14+ uses cfi_ignorelist.txt.
+# Do not synthesize a fake ignorelist or suppress this compiler check.
+resource="$("$STAGE_DIR/bin/clang" -print-resource-dir)"
+case "$resource" in "$STAGE_DIR"/lib/clang/*) ;; *) die "Wrong resource path: $resource";; esac
+for cfi_filename in cfi_blacklist.txt cfi_ignorelist.txt; do
+  cfi_src="$SRC_DIR/llvm-project/compiler-rt/lib/cfi/$cfi_filename"
+  if test -s "$cfi_src"; then
+    install -D -m 0644 "$cfi_src" "$resource/share/$cfi_filename"
+  fi
+done
+# The packaged clang-resource-headers target does not build compiler-rt.
+# CFI must use upstream data from the *same pinned* llvm-project revision.
+if test "$major" -ge 14 && test "$major" -le 21; then
+  test -s "$resource/share/cfi_ignorelist.txt" \
+    || die "Missing upstream CFI ignorelist required by Clang $CLANG_VERSION"
 fi
 for project in llvm clang lld; do
   if test -f "$SRC_DIR/llvm-project/$project/LICENSE.TXT"; then
