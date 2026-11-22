@@ -109,6 +109,12 @@ ln -s llvm-readobj "$STAGE_DIR/bin/llvm-readelf"
 ln -s llvm-symbolizer "$STAGE_DIR/bin/llvm-addr2line"
 mkdir -p "$STAGE_DIR/lib/clang" "$STAGE_DIR/share/licenses"
 cp -a "$BUILD_DIR/lib/clang/12.0.5" "$STAGE_DIR/lib/clang/"
+# Clang 12's CFI driver requires this default ignorelist even when
+# compiler-rt runtimes are intentionally not part of the minimal SDK.
+# Copy the original file from the SAME pinned llvm-project checkout.
+cfi_blacklist="$SRC_DIR/llvm-project/compiler-rt/lib/cfi/cfi_blacklist.txt"
+test -s "$cfi_blacklist" || die "missing pinned compiler-rt CFI blacklist: $cfi_blacklist"
+install -D -m 0644 "$cfi_blacklist" "$STAGE_DIR/lib/clang/12.0.5/share/cfi_blacklist.txt"
 for project in llvm clang lld; do
   cp "$SRC_DIR/llvm-project/$project/LICENSE.TXT" "$STAGE_DIR/share/licenses/$project-LICENSE.TXT"
 done
