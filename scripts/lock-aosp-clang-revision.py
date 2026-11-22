@@ -65,7 +65,7 @@ def run(revision, out_dir):
     xml = fetch(manifest_url, decode_base64=True)
     version_file = fetch(f"{base_url}/AndroidVersion.txt?format=TEXT", decode_base64=True)
     version_text = version_file.decode("utf-8")
-    match = re.match(r"^(\d+\.\d+\.\d+)\s*$", version_text)
+    match = re.match(r"^(\d+\.\d+\.\d+)[ \t]*(?:\r?\n|$)", version_text)
     if not match:
         raise RuntimeError("Could not identify version: " + version_text)
     clang_version = match.group(1)
